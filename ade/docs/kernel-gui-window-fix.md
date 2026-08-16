@@ -211,9 +211,7 @@ login-manager`) instead of respawning forever while `ade` never runs.
     --- a/login-manager/src/main.rs
     +++ b/login-manager/src/main.rs
     @@ -10,6 +10,11 @@
-     const MAX_FAILED_ATTEMPTS: u32 = 10;
-     /// Backoff pause in nanoseconds after MAX_FAILED_ATTEMPTS (30 s).
-     const BACKOFF_NS: u64 = 30_000_000_000;
+     const SHADOW_PATH: &str = "/etc/shadow";
     +/// Non-zero exit code for a fatal window-creation failure (kernel Option 2):
     +/// init treats a clean exit 0 as "ran its course" (crash counter reset ->
     +/// unbounded respawn); a non-zero exit accumulates toward MAX_RESPAWNS so
@@ -222,7 +220,9 @@ login-manager`) instead of respawning forever while `ade` never runs.
      
      fn verify_password(username: &str, password: &str) -> bool {
          let data = match libsarga::fs::read_to_string(SHADOW_PATH) {
-    @@ -81,7 +86,12 @@
+             Ok(d) => d.into_bytes(),
+             Err(_) => return false,
+    @@ -79,7 +84,12 @@
                      alloc::format!("[login] failed to create window: errno {}\n", e)
                  };
                  io::print_str(&msg);
@@ -236,6 +236,7 @@ login-manager`) instead of respawning forever while `ade` never runs.
              }
          };
      
+```
 ```
 
 Notes:
