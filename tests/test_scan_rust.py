@@ -15,7 +15,7 @@ import os
 import re
 import unittest
 
-from scan_rust import strip_rust
+from scan_rust import strip_definition_lines, strip_rust
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TESTS_DIR = os.path.join(REPO_ROOT, "tests")
@@ -80,6 +80,22 @@ class StripRustBehaviorTest(unittest.TestCase):
         )
         self.assertEqual(code.count("note_failed_attempt("), 2)  # def + 1 call
         self.assertNotIn("process::exit", code)
+
+
+    def test_strip_definition_lines_removes_only_definition_lines(self):
+        src = (
+            "pub fn read_line(history: &mut History, prompt: &str) -> String {\n"
+            "    // interactive editor\n"
+            "    String::new()\n"
+            "}\n"
+            "let called = read_line(&mut h, \"$ \");\n"
+        )
+        out = strip_definition_lines(strip_rust(src), [r"\bfn\s+read_line\b"])
+        self.assertNotIn("fn read_line", out,
+                         "definition line must be blanked")
+        self.assertIn("read_line(&mut h", out,
+                      "a genuine call site must survive the strip")
+        self.assertNotIn("interactive", out)
 
 
 class StripRustSingleHomeTest(unittest.TestCase):

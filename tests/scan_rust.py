@@ -32,3 +32,17 @@ def strip_rust(src: str) -> str:
     code = re.sub(r"//[^\n]*", "", code)                  # strip line comments
     code = re.sub(r"/\*.*?\*/", "", code, flags=re.S)   # strip block comments
     return code
+
+def strip_definition_lines(code: str, patterns) -> str:
+    """Blank whole lines that DEFINE the given items.
+
+    Used by caller/usage scans so a second home's DEFINITION does not count
+    as a usage of the item (e.g. sash/src/readline.rs defines its own
+    ``read_line``; the caller scan must not treat that line as a caller of
+    libsarga's reader). Each pattern is a regex matched against a single
+    line (``re.M``); the entire matching line is removed. Patterns must be
+    mid-line regexes (no ``^``/``$`` anchors).
+    """
+    for pat in patterns:
+        code = re.sub(r"^.*" + pat + r".*$", "", code, flags=re.M)
+    return code

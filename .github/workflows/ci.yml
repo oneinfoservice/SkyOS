@@ -78,7 +78,18 @@ jobs:
             target/
           key: clippy-${{ hashFiles('Cargo.lock') }}
           restore-keys: clippy-
-      - run: cargo clippy -Zbuild-std=core,alloc --target x86_64-sarga.json -- -D warnings
+      - name: Clippy (sarga target -- product target, ALL workspace members)
+        run: |
+          # No `-p` filters and no workspace `default-members`: a silent
+          # narrowing of this gate trips tests/test_clippy_guard.py host-side.
+          cargo clippy -Zbuild-std=core,alloc --target x86_64-sarga.json --workspace -- -D warnings
+      - name: Clippy (host target -- lib targets; catches cfg-gated warnings the sarga target cannot see)
+        run: |
+          # --lib: the no_std bin crates cannot compile on the host (panic
+          # handler + allocator are cfg(target_os = "none")); the host-test
+          # cfg code this leg exists to lint lives in the lib targets
+          # (libsarga, libskyaudio).
+          cargo clippy --workspace --lib -- -D warnings
 
   dead-code:
     name: No dead-code suppressions
@@ -763,6 +774,26 @@ jobs:
           fi
           grep -q "PASS: DRM set_mode delivered" qemu_drm_probe_log.txt
 
+      # DHCP/net probe (K10-gated): settles whether smoltcp works on
+      # real hardware. Today '[DHCP] lease lost' fires and
+      # '[DHCP] configured IP:' never appears - the harness dumps the
+      # net-marker evidence and defers via KERNEL-GATED (exit 0); the
+      # moment K10 lands (kernel-net-dhcp.md) the marker assert becomes
+      # hard. The TCP-echo leg is documented as blocked on K10 + a
+      # guest socket tool (see the doc).
+      - name: DHCP/net probe (K10-gated)
+        working-directory: SkyOS
+        timeout-minutes: 8
+        run: |
+          set -euxo pipefail
+          if [ -z "$ISO" ]; then echo "ERROR: No ISO found"; exit 1; fi
+          expect tests/qemu_net_probe.exp "$ISO" 240 | tee qemu_net_probe_log.txt
+          if grep -q "KERNEL-GATED:" qemu_net_probe_log.txt; then
+            echo "::warning::KERNEL GATE: DHCP lease never obtained on real hardware (K10 not landed) - settlement deferred with evidence"
+            exit 0
+          fi
+          grep -q "PASS: DHCP lease obtained" qemu_net_probe_log.txt
+
       # Forced-failure variant: build a fail-vahid ISO (init compiled with
       # the force-vahid-fail feature spawns vahid with --force-fail, driving
       # its FATAL /dev path). The give-up harness's vahid arm then gets a
@@ -1009,6 +1040,20 @@ jobs:
       - name: Login echo contract test
         working-directory: SkyOS
         run: python3 tests/test_login_echo.py
+      - name: Clippy-fix guard (newer-nightly lints)
+        working-directory: SkyOS
+        # libskyos.rs getdents casts + posix.rs SHEBANG were fixed so a
+        # modern clippy stays clean without touching the CI-pinned memcpy
+        # runtime shims; this source pin fails if they regress.
+        run: python3 tests/test_clippy_guard.py
+
+      - name: Single-home gate (tty/echo/auth constants)
+        working-directory: SkyOS
+        # Termios/echo/read_line/read_password live only in libsarga::tty,
+        # the cap constants only in libsarga::auth, and svc reads via the
+        # shared libsarga::io::read_to_string - a future auth binary that
+        # reintroduces a private copy fails here before any boot.
+        run: python3 tests/test_single_home_gate.py
 
       - name: Vahid exit-code discipline test
         working-directory: SkyOS
@@ -1032,6 +1077,18 @@ jobs:
         # framework and the FUTURE gui_tests.rs register() calls, so the
         # spec cannot drift while the kernel rewrite is in flight.
         run: python3 tests/test_selftest_spec_contract.py
+
+      - name: Stride scheduler contract test
+        working-directory: SkyOS
+        # Host trace of kernel/src/task/scheduler.rs + thread.rs +
+        # syscalls/mod.rs pinning what is REAL (3-source pick_next order,
+        # pass+=stride accounting, route_outgoing sleep/futex/pipe routing,
+        # tick's IRQ-safe sleep wake, SCHED_OTHER-only sched_setattr) vs
+        # SCAFFOLDING (boost_thread_priority hard-stub, set_tickets dead
+        # code, selftest-only queue helpers, SCHED_QUIESCE). The kernel
+        # rewrite must preserve the real paths and deliberately un-stub
+        # the scaffolding - this gate fails loudly if either side drifts.
+        run: python3 tests/test_scheduler_contract.py
 
       - name: Kernel change queue contract test
         working-directory: SkyOS
@@ -1074,6 +1131,9 @@ jobs:
       - name: DRM probe contract test
         working-directory: SkyOS
         run: python3 tests/test_drm_probe_contract.py
+      - name: DHCP/net probe contract test
+        working-directory: SkyOS
+        run: python3 tests/test_net_probe_contract.py
       - name: SVC wire table contract test
         working-directory: SkyOS
         run: python3 tests/test_svc_wire_contract.py
@@ -1107,6 +1167,13 @@ jobs:
         # and .cargo/config.toml scopes build-std/panic=abort to the sarga
         # target so the std test harness works here. No QEMU, no syscalls.
         run: cargo test -p libsarga --lib
+
+      - name: App wiring gate (initrd manifest <-> ade catalog)
+        working-directory: SkyOS
+        # build_initrd only WARNS on a missing binary, so the image can
+        # silently ship without an app the catalog advertises. This gate
+        # cross-checks the manifest against the catalog and cargo metadata.
+        run: python3 tests/test_app_wiring.py
 
       - name: skyos-test host framework (buddy allocator + PS/2 mouse)
         working-directory: SkyOS

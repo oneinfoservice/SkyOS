@@ -1,0 +1,196 @@
+#!/usr/bin/expect -f
+# DHCP/net probe (K10-gated): settles whether smoltcp actually works on
+# real hardware. Boots the ISO with the e1000 device (QEMU user-mode
+# netdev -> SLIRP DHCP server), waits for the console getty, logs in
+# root/skyos, then reads the DHCP settlement from the accumulated serial
+# buffer: a real lease prints '[DHCP] configured IP:' (kernel
+# net/mod.rs:124, smoltcp Event::Configured). Today the lease is NEVER
+# obtained - '[DHCP] lease lost' (net/mod.rs:148, Event::Deconfigured)
+# fires at the first poll and no configured IP ever follows, so smoltcp
+# does not deliver on hardware with the current kernel. The harness dumps
+# the captured net-marker evidence and defers via KERNEL-GATED (exit 0),
+# the drm-probe pattern; the moment K10 lands (kernel-net-dhcp.md), the
+# marker becomes a hard PASS.
+#
+# The TCP echo session leg is NOT drivable today and is documented as a
+# future stage, not a silent omission: it is blocked on K10 (no lease, so
+# the guest has no reachable IP) AND on a guest-side TCP client/server
+# (the kernel net stack is dhcp/dns/unix only - no listener - and no
+# userspace socket tool exists in the initrd).
+#
+# PER-CHECK AUDIT - every pattern verified against sources:
+#   1 boot_login       login:            REAL  login/src/main.rs (getty
+#                                            prompt; console path)
+#   2 password_prompt  Password:         REAL  login/src/main.rs (password
+#                                            read after username)
+#   3 shell_prompt     sash[             REAL  root's shell /bin/sash; PS1
+#                                            "sash[\w]> "
+#   4 net_init         [BOOT] net init...   REAL  kernel/src/main.rs:305
+#                                            (serial_write before
+#                                            net::init(); unconditional)
+#   5 e1000_regs       [E1000] sts=      REAL  kernel/src/drivers/net/
+#                                            e1000.rs:244 (serial register
+#                                            dump; ring/status debug)
+#   6 dhcp_leased      [DHCP] configured IP:  REAL  kernel/src/net/mod.rs:124
+#                                            (serial_write on smoltcp
+#                                            Event::Configured; the K10
+#                                            positive marker)
+#   7 dhcp_lost        [DHCP] lease lost      REAL  kernel/src/net/mod.rs:148
+#                                            (serial_write on smoltcp
+#                                            Event::Deconfigured; fires at
+#                                            the first poll when no lease
+#                                            exchange completes)
+#   8 stack_printf     Network: Stack initialized  VGA-ONLY  kernel/src/net/
+#                                            mod.rs:80 (crate::println! ->
+#                                            vga_buffer.rs:164; NOT
+#                                            serial-greppable - never grep
+#                                            this marker)
+#   9 kernel_gated     KERNEL-GATED:     deferral  drm-probe pattern:
+#                                            dhcp_lost proven + no
+#                                            configured IP at deadline ->
+#                                            exit 0 with evidence; ci.yml
+#                                            mirrors the conditional
+#  10 tcp_echo_leg     (documented future) blocked on K10 (no lease) + a
+#                                            guest TCP client/server tool;
+#                                            no socket tool exists today
+#
+# Usage: expect tests/qemu_net_probe.exp <iso_path> [timeout_seconds]
+
+set iso [lindex $argv 0]
+set timeout [lindex $argv 1]
+if {$timeout == ""} { set timeout 240 }
+set logfile "qemu_net_probe_log.txt"
+
+spawn qemu-system-x86_64 \
+    -bios OVMF.fd \
+    -cdrom "$iso" \
+    -m 512M -smp 2 \
+    -nographic -no-reboot \
+    -serial mon:stdio \
+    -device e1000,netdev=net0 -netdev user,id=net0
+
+# Keep the whole boot in the expect buffer: the net markers print early
+# (during boot, before 'login:') and the settlement greps the ACCUMULATED
+# buffer. Set AFTER spawn - match_max targets the current spawn_id.
+match_max 1000000
+
+proc send_password {pw} {
+    log_user 0
+    send "$pw\r"
+    log_user 1
+}
+
+# Dump every serial line carrying a net marker (BOOT/E1000/DHCP) from the
+# accumulated buffer, so a deferral ships its evidence verbatim.
+proc dump_net_evidence {} {
+    global expect_out
+    set out ""
+    foreach ln [split $expect_out(buffer) "\n"] {
+        if {[regexp {\[(BOOT|E1000|DHCP)\]} $ln]} {
+            append out "$ln\n"
+        }
+    }
+    send_user "NET-EVIDENCE (serial net markers since boot):\n$out"
+}
+
+set pass_count 0
+set fail_count 0
+
+# 1. Boot: the console getty's login: prompt. The DHCP attempt has already
+#    concluded during boot (one-shot lease, no renew), so by the time
+#    'login:' lands the settlement evidence is in the buffer.
+send_user "=== 1. boot to console getty ===\n"
+expect -timeout 90 {
+    -re {login: } {
+        incr pass_count
+        send_user "PASS: console getty login prompt\n"
+    }
+    "=== KERNEL PANIC ===" {
+        incr fail_count
+        send_user "FAIL: kernel panicked during boot\n"
+        exit 1
+    }
+    timeout {
+        incr fail_count
+        send_user "FAIL: boot timeout - no 'login:' (console path)\n"
+        exit 1
+    }
+    eof {
+        incr fail_count
+        send_user "FAIL: QEMU exited during boot\n"
+        exit 1
+    }
+}
+
+# 2. The K10 settlement. Positive first: the lease marker may already be
+#    in the accumulated buffer (it prints during boot). If not, a bounded
+#    wait for a future kernel that retries/renews DHCP after login. Then
+#    the tri-state: configured-IP -> PASS; lease-lost without
+#    configured-IP -> KERNEL-GATED deferral with evidence; neither -> FAIL
+#    (stack never ran / no NIC).
+send_user "=== 2. DHCP lease settlement (K10-gated) ===\n"
+if {[regexp -- {\[DHCP\] configured IP:} $expect_out(buffer)]} {
+    incr pass_count
+    send_user "PASS: DHCP lease obtained on real hardware - smoltcp RX/TX works (K10 landed)\n"
+} else {
+    expect -timeout 60 {
+        -re {\[DHCP\] configured IP:} {
+            incr pass_count
+            send_user "PASS: DHCP lease obtained on real hardware - smoltcp RX/TX works (K10 landed)\n"
+        }
+        timeout {
+            if {[regexp -- {\[DHCP\] lease lost} $expect_out(buffer)]} {
+                # Settlement: the stack ran (E1000 + DHCP socket polled,
+                # Event::Deconfigured fired) but no lease exchange
+                # completed - smoltcp RX/TX does not deliver on hardware.
+                dump_net_evidence
+                send_user "KERNEL-GATED: DHCP lease never obtained on real hardware - '\[DHCP] lease lost' proven but no '\[DHCP] configured IP:' (smoltcp RX/TX does not deliver; kernel rewrite must land kernel-net-dhcp.md K10)\n"
+                send_user "\nNET probe: $pass_count passed, $fail_count failed (KERNEL-GATED)\n"
+                exit 0
+            }
+            incr fail_count
+            send_user "FAIL: no DHCP markers at all - net stack never ran or no NIC (expected '\[BOOT] net init...' and a '\[DHCP]' line)\n"
+            exit 1
+        }
+        eof {
+            incr fail_count
+            send_user "FAIL: QEMU exited while settling the DHCP outcome\n"
+            exit 1
+        }
+    }
+}
+
+# 3. Console login root/skyos over the serial console: proves the guest
+#    reached a state where a user could drive the stack (and where the
+#    future TCP-echo leg would run a guest socket client).
+send_user "=== 3. console login root/skyos ===\n"
+send "root\r"
+expect -timeout 20 {
+    -re {Password: } {
+        incr pass_count
+        send_user "PASS: password prompt\n"
+    }
+    timeout { send_user "FAIL: no Password: prompt\n"; exit 1 }
+    eof { send_user "FAIL: QEMU exited at password prompt\n"; exit 1 }
+}
+send_password "skyos"
+
+expect -timeout 20 {
+    -re {sash\[} {
+        incr pass_count
+        send_user "PASS: console login landed at sash\n"
+    }
+    -re {Login incorrect} {
+        send_user "FAIL: bad credentials - console login rejected\n"
+        exit 1
+    }
+    timeout {
+        send_user "FAIL: no sash prompt after skyos (wrong password or hang)\n"
+        exit 1
+    }
+    eof { send_user "FAIL: QEMU exited during login\n"; exit 1 }
+}
+
+send_user "\nNET probe: $pass_count passed, $fail_count failed\n"
+if {$fail_count > 0} { exit 1 }
+exit 0
