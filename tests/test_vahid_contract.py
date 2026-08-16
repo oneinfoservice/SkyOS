@@ -519,9 +519,20 @@ class VahidExitCodeContract(unittest.TestCase):
         # (so VfsNode::create's trait default -> Err(()), vfs/mod.rs:
         # 104-106, and sys_open falls through to ENOENT, syscalls/mod.rs:
         # 1379/1400), and the native node list in DevFs::new (devfs.rs:
-        # 306-358) carries no random/urandom/console. When the kernel
-        # rewrite lands a real mknod + create path, this pin fires so the
-        # doc conclusion and the gated vahid landing update together.
+        # 306-358) carries no random/urandom/console. The absence pin in
+        # leg 2 below is keyed to the tree being tested (devfs.rs is read
+        # from whatever kernel checkout is present - CI's fresh
+        # SKYIOUS-KERNEL default-branch checkout, or a local tree like the
+        # in-flight 'SKYIOUS KERNEL'): it asserts absence ONLY while the
+        # nodes are absent, i.e. it fires only against the pre-landing CI
+        # default branch. The moment random/urandom/console are native in
+        # the checked-out kernel (the in-flight devfs work, or the rewrite
+        # merged to the CI default branch), leg 2 flips to a positive pin
+        # of the new state instead of failing - so a local in-flight tree
+        # never trips it. Leg 1 (no create override) stays the
+        # unconditional tripwire for the real mknod + create landing,
+        # which is when the doc conclusion and the gated vahid landing
+        # must update together.
         devfs = _read_kernel(os.path.join("kernel", "src", "vfs", "devfs.rs"))
         vfs_mod = _read_kernel(os.path.join("kernel", "src", "vfs", "mod.rs"))
         if devfs is None:
@@ -541,21 +552,41 @@ class VahidExitCodeContract(unittest.TestCase):
             "kernel devfs.rs gained a create override - update the doc "
             "ENOENT conclusion and the gated vahid landing",
         )
-        # 2. The native node list still excludes the three names the doc
-        #    says cannot be created, and keeps the three it says can.
-        #    Shape-coupled probe: the regex matches the current
-        #    Arc::new(DevNode { name: String::from("...") ... }) form. A
-        #    legitimate table-driven refactor of DevFs::new would break
-        #    extraction and trip the positive legs below - re-review, it
-        #    is not necessarily a dropped node.
+        # 2. The native node list pin is state-keyed: while the kernel
+        #    tree lacks random/urandom/console, assert their absence (the
+        #    doc's "cannot be created" claim holds); once they are native
+        #    in the checked-out kernel, assert their presence instead, and
+        #    a PARTIAL landing (one of the three missing) still fails.
+        #    The create-override leg (#1) remains the unconditional
+        #    tripwire, so a nodes-only landing never trips this test but
+        #    the full mknod rewrite does. Shape-coupled probe: the regex
+        #    matches the current Arc::new(DevNode { name:
+        #    String::from("...") ... }) form. A legitimate table-driven
+        #    refactor of DevFs::new would break extraction and trip the
+        #    positive legs below - re-review, it is not necessarily a
+        #    dropped node.
         node_names = re.findall(r'name: String::from\("([^"]+)"\)', devfs)
-        for missing in ("random", "urandom", "console"):
-            self.assertNotIn(
-                missing,
-                node_names,
-                "kernel devfs gained a native node '%s' - update the doc "
-                "ENOENT conclusion" % missing,
-            )
+        if "random" in node_names or "urandom" in node_names:
+            # Nodes have landed (in-flight devfs work, or merged to the CI
+            # default branch): pin the new native-node state.
+            for native in ("random", "urandom", "console"):
+                self.assertIn(
+                    native,
+                    node_names,
+                    "kernel devfs landed a partial native node set - '%s' "
+                    "missing from DevFs::new" % native,
+                )
+        else:
+            # Pre-landing kernel (current CI default branch): the three
+            # names cannot be created - absent natively and no create
+            # override, so O_CREAT falls through to ENOENT. Pin absence.
+            for missing in ("random", "urandom", "console"):
+                self.assertNotIn(
+                    missing,
+                    node_names,
+                    "kernel devfs gained a native node '%s' - update the "
+                    "doc ENOENT conclusion" % missing,
+                )
         for native in ("null", "zero", "tty"):
             self.assertIn(
                 native,

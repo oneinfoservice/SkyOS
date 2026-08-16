@@ -1211,8 +1211,8 @@ jobs:
         run: |
           set -o pipefail
           cargo run --manifest-path tests/skyos-test/Cargo.toml -- run 2>&1 | tee skyos-test-log.txt
-          grep -q "Total: 85 | Passed: 85 | Failed: 0" skyos-test-log.txt
-          for pin in kernel::alloc:6 kernel::mouse:11 kernel::vfs:7 kernel::futex:12 kernel::paging:14 kernel::wait:15 kernel::fs:20; do
+          grep -q "Total: 107 | Passed: 107 | Failed: 0" skyos-test-log.txt
+          for pin in kernel::alloc:6 kernel::mouse:11 kernel::vfs:7 kernel::futex:12 kernel::paging:14 kernel::wait:15 kernel::fs:42; do
             cat="${pin%:*}"; want="${pin##*:}"
             out="$(cargo run --manifest-path tests/skyos-test/Cargo.toml -- run -c "$cat" 2>&1)"
             echo "$out" >> skyos-test-log.txt

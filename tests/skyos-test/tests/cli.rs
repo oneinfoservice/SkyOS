@@ -63,21 +63,21 @@ fn total_timeout_flag_is_accepted() {
     let out = bin().args(["run", "--total-timeout-ms", "0"]).output().expect("run binary");
     assert!(out.status.success(), "disabled cap must not break a green run: {:?}", out.status);
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("Total: 85 | Passed: 85 | Failed: 0"), "summary: {stdout}");
+    assert!(stdout.contains("Total: 107 | Passed: 107 | Failed: 0"), "summary: {stdout}");
 }
 
 #[test]
 fn list_categories_prints_unique_categories_with_counts() {
     // Exact pin of the current suite's category census: breaks loudly if a
     // category is added, removed, or renamed (update it deliberately). The
-    // counts must sum to the pinned total (85).
+    // counts must sum to the pinned total (107).
     let out = bin().arg("--list-categories").output().expect("run binary");
     assert!(out.status.success(), "--list-categories must succeed: {:?}", out.status);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(
         stdout.trim(),
         "kernel::alloc: 6\n\
-         kernel::fs: 20\n\
+         kernel::fs: 42\n\
          kernel::futex: 12\n\
          kernel::mouse: 11\n\
          kernel::paging: 14\n\
