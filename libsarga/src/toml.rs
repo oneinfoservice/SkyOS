@@ -309,7 +309,6 @@ fn parse_value(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,25 +374,34 @@ mod tests {
         assert_eq!(doc.get_string("version"), Some("1.0"));
         let tables = doc.get_tables("files");
         assert_eq!(tables.len(), 2);
-        let first: Vec<(&str, &TomlValue)> = tables[0]
+        let first: Vec<(&str, &TomlValue)> =
+            tables[0].iter().map(|(k, v)| (k.as_str(), v)).collect();
+        assert!(first
             .iter()
-            .map(|(k, v)| (k.as_str(), v))
-            .collect();
-        assert!(first.iter().any(|(k, v)| *k == "path" && matches!(v, TomlValue::String(s) if s == "/bin/foo")));
-        assert!(first.iter().any(|(k, v)| *k == "size" && matches!(v, TomlValue::Integer(1024))));
+            .any(|(k, v)| *k == "path" && matches!(v, TomlValue::String(s) if s == "/bin/foo")));
+        assert!(first
+            .iter()
+            .any(|(k, v)| *k == "size" && matches!(v, TomlValue::Integer(1024))));
     }
 
     #[test]
     fn test_parse_comments_and_blank_lines() {
-        let doc = TomlDocument::parse("# leading comment\nkey = \"v\" # trailing\n\n\nother = 1\n").unwrap();
+        let doc = TomlDocument::parse("# leading comment\nkey = \"v\" # trailing\n\n\nother = 1\n")
+            .unwrap();
         assert_eq!(doc.get_string("key"), Some("v"));
-        assert!(doc.values.iter().any(|(k, v)| k == "other" && matches!(v, TomlValue::Integer(1))));
+        assert!(doc
+            .values
+            .iter()
+            .any(|(k, v)| k == "other" && matches!(v, TomlValue::Integer(1))));
     }
 
     #[test]
     fn test_parse_empty_and_comment_only() {
         assert!(TomlDocument::parse("").unwrap().values.is_empty());
-        assert!(TomlDocument::parse("# just a comment").unwrap().values.is_empty());
+        assert!(TomlDocument::parse("# just a comment")
+            .unwrap()
+            .values
+            .is_empty());
     }
 
     #[test]
@@ -401,6 +409,9 @@ mod tests {
         // The minimal parser skips [section] headers and keeps the keys at the
         // top level; pinned here so a change is a deliberate decision.
         let doc = TomlDocument::parse("[section]\na = 1\n").unwrap();
-        assert!(doc.values.iter().any(|(k, v)| k == "a" && matches!(v, TomlValue::Integer(1))));
+        assert!(doc
+            .values
+            .iter()
+            .any(|(k, v)| k == "a" && matches!(v, TomlValue::Integer(1))));
     }
 }

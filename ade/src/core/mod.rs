@@ -1,9 +1,9 @@
 pub(crate) mod damage;
-pub(crate) mod desktop;
+pub mod desktop;
 pub(crate) mod desktop_icons;
 pub(crate) mod dialog;
-pub(crate) mod event;
-pub(crate) mod geometry;
+pub mod event;
+pub mod geometry;
 pub(crate) mod launcher;
 pub(crate) mod settings;
 pub(crate) mod start_menu;

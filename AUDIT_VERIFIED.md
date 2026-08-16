@@ -30,7 +30,7 @@ Commit `3216775` ("fix(userspace): audit-verified bug fixes, ADE refactor, and c
 - **D1 (unused ADE scaffold modules)** — **RESOLVED.** The `ade/src/sys/{session,session_service,login_session,notification,power}.rs` files and `ade/src/util/clipboard_service.rs` were deleted.
 - **D2 (permission constant table collision)** — **RESOLVED.** The duplicate `PERM_*` table in `ade/src/sec/perms.rs` was removed; the live constants live only in `ade/src/ipc/permission.rs`.
 - **D3 (password verification duplication)** — **RESOLVED.** `verify_password`/`hex_decode` are consolidated in `libsarga/src/hash.rs` and used by both `login` and `login-manager`. `hex_decode` now wraps the `hex` crate.
-- **T1 (zero unit tests)** — **RESOLVED.** `libsarga`'s `#[cfg(test)]` modules (`errno.rs`, `net.rs`, `semver.rs`) compile and run on the host: `cargo test -p libsarga` runs 23 tests, wired into the CI `host-tests` job. `libsarga/src/lib.rs` gates its `no_std`/lang items with `cfg_attr(not(test), ..)`/`#[cfg(not(test))]`, and `.cargo/config.toml` scopes `build-std`/`panic=abort` to the sarga target so the std test harness works.
+- **T1 (zero unit tests)** — **RESOLVED.** `libsarga`'s `#[cfg(test)]` modules (`errno.rs, fs.rs, gui.rs, hash.rs, net.rs, png.rs, semver.rs, theme.rs, and toml.rs`) compile and run on the host: `cargo test -p libsarga` runs 75 tests, wired into the CI `host-tests` job. `ade` gained a lib target and its `sys/{audio,display,input,network}` + `util/{app_catalog,explorer}` `#[cfg(test)]` modules run too: `cargo test -p ade --lib` runs 36 tests in the same CI job. `libsarga`/`ade` gate `no_std` with `cfg_attr(not(test), ..)`; the lang items are gated on the sarga targets (`os = "none"`), so `libsarga` also builds as a host dependency (dependencies never compile with `cfg(test)`). `.cargo/config.toml` scopes `build-std`/`panic=abort` to the sarga target so the std test harness works.
 - **B2 (x86_64-vahi "legacy" naming)** — **STALE/FALSE.** `x86_64-vahi` is the kernel crate's real build target (`kernel/target/x86_64-vahi` exists); scripts referencing it are not stale. The `velox` references were removed.
 
 ---
@@ -200,9 +200,9 @@ The following claims in SKYOS_DEV_REPORT.md Section 4 and 6 were verified as **F
 - **File:** `Cargo.toml:3-45`
 - **Description:** Zero `#[test]` functions exist in any workspace crate (libsarga, ade, coreutils, sash, etc.). The only `#[test]` matches are in `target/x86_64-sarga/doc/` which are from the `ttf_parser` dependency, not project code.
 - **Workspace Exclusion:** `tests/skyos-test` and `tests/skyos-test-core` crates exist but are excluded from workspace members in `Cargo.toml`.
-- **CI:** `.github/workflows/ci.yml` runs `fmt`, `clippy`, build, and the `host-tests` job's `cargo test -p libsarga` (libsarga's errno/net/semver unit tests).
+- **CI:** `.github/workflows/ci.yml` runs `fmt`, `clippy`, build, and the `host-tests` job's `cargo test -p libsarga` (libsarga's errno/fs/gui/hash/net/png/semver/theme/toml unit tests).
 - **Severity:** HIGH
-- **Verification Status:** **RESOLVED** — `cargo test -p libsarga` runs 23 host tests; see Resolution Update.
+- **Verification Status:** **RESOLVED** — `cargo test -p libsarga` runs 75 host tests and `cargo test -p ade --lib` runs 36 host tests; see Resolution Update.
 - **Remediation Phase:** Phase 4
 
 ---
@@ -262,7 +262,7 @@ The following claims in SKYOS_DEV_REPORT.md Section 4 and 6 were verified as **F
    - Adopt `spkg` as canonical package manager name
    - Update references to `sargash` and `skypkg` in CI, scripts, app registries
 
-4. **Wire unit-test path or document gap** (T1) — **RESOLVED** — `libsarga`'s errno/net/semver `#[cfg(test)]` modules compile and run on the host via `cargo test -p libsarga` (23 tests), with a matching step in the CI `host-tests` job. `tests/skyos-test`/`skyos-test-core` remain excluded from the workspace (host-side tools with their own `[workspace]`).
+4. **Wire unit-test path or document gap** (T1) — **RESOLVED** — `libsarga`'s errno/fs/gui/hash/net/png/semver/theme/toml `#[cfg(test)]` modules compile and run on the host via `cargo test -p libsarga` (75 tests), and `ade`'s sys/{audio,display,input,network} + util/{app_catalog,explorer} modules via `cargo test -p ade --lib` (36 tests), each with a matching step in the CI `host-tests` job. `tests/skyos-test`/`skyos-test-core` remain excluded from the workspace (host-side tools with their own `[workspace]`).
 
 ---
 
@@ -273,7 +273,7 @@ This audit corrects 4 false claims from the previous report and documents 14 ver
 1. **Security:** Fixed salt in password generation (S1) and login-manager authentication weaknesses (S2) — **both resolved** (commit `3216775`)
 2. **Correctness:** Syscall number mismatch (C1) and error-handling inconsistency (C2) — **C1 resolved**; C2 open
 3. **Build Reproducibility:** Hardcoded developer paths (B1) — open
-4. **Testing:** Complete absence of unit tests (T1) — resolved; `cargo test -p libsarga` runs libsarga's errno/net/semver `#[cfg(test)]` modules on the host (23 tests, CI-wired)
+4. **Testing:** Complete absence of unit tests (T1) — resolved; `cargo test -p libsarga` runs libsarga's errno/fs/gui/hash/net/png/semver/theme/toml `#[cfg(test)]` modules on the host (75 tests, CI-wired), and `cargo test -p ade --lib` runs ade's sys/{audio,display,input,network} + util/{app_catalog,explorer} modules (36 tests, same job)
 
 Of the 14 verified issues, 6 are resolved, 2 are stale/false, and 6 remain open (C2, C3, S3, A1, B1, D4).
 

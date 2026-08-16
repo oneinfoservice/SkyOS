@@ -1,23 +1,25 @@
 //! ADE desktop entrypoint — init, event loop, rendering.
+//!
+//! The desktop modules live in the `ade` library (see `lib.rs`) so the pure
+//! logic is host-testable; this binary is the bare-metal entrypoint only.
+//! The `no_std`/`no_main` attributes and the manual `main` are applied only
+//! for the real build — under `cfg(test)` the std test harness supplies its
+//! own `main`.
 
-#![no_std]
-#![no_main]
+#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(test), no_main)]
 extern crate alloc;
-use core::desktop::Desktop;
+use ade::core::desktop::Desktop;
+use ade::core::event::Event;
+use ade::core::geometry::Point;
+use ade::input;
+use ade::render;
+use ade::render::compositor::Compositor;
+use ade::util;
+use libsarga::gui::Window;
 use libsarga::io;
-use libsarga::{gui::Window, sarga_main};
-
-mod apps;
-mod core;
-mod input;
-mod ipc;
-mod layout;
-mod render;
-mod sec;
-mod service;
-mod sys;
-mod util;
-use render::compositor::Compositor;
+#[cfg(not(test))]
+use libsarga::sarga_main;
 
 fn user_main() -> i32 {
     io::print_str("[ade] starting desktop environment\n");
@@ -34,7 +36,7 @@ fn user_main() -> i32 {
         // exact literal is cross-pinned by tests/test_ade_selftest_gate.py
         // against this source — update BOTH when the table legitimately
         // changes. `ctrlq=no` means Ctrl+Q is unbound (no desktop action).
-        let dump = crate::input::dump_bindings();
+        let dump = input::dump_bindings();
         io::print_str(&alloc::format!(
             "[input] bindings={} quit={} chord={} ctrlq={} grabs={}\n",
             dump.count,
@@ -93,7 +95,7 @@ fn user_main() -> i32 {
             // modifier bits yet, so `from_raw` behaves exactly like
             // `from_byte` until the Phase C kernel change lands — see
             // docs/kernel-gui-modifier-delivery.md, Design A.
-            desktop.handle_event(core::event::Event::Key(key));
+            desktop.handle_event(Event::Key(key));
             if desktop.session.is_ending() {
                 break;
             }
@@ -106,20 +108,20 @@ fn user_main() -> i32 {
         let (pressed, released, dragging) =
             desktop.update_mouse(ms.x as i32, ms.y as i32, ms.buttons & 1 != 0);
         if ms.scroll != 0 {
-            desktop.handle_event(core::event::Event::Scroll(ms.scroll));
+            desktop.handle_event(Event::Scroll(ms.scroll));
         }
-        let mouse_pt = crate::core::geometry::Point::new(ms.x as i32, ms.y as i32);
+        let mouse_pt = Point::new(ms.x as i32, ms.y as i32);
         if pressed {
-            desktop.handle_event(core::event::Event::MouseClick(mouse_pt));
+            desktop.handle_event(Event::MouseClick(mouse_pt));
         } else if ms.buttons & 4 != 0 {
-            desktop.handle_event(core::event::Event::MouseMiddle(mouse_pt));
+            desktop.handle_event(Event::MouseMiddle(mouse_pt));
         } else if ms.buttons & 2 != 0 {
-            desktop.handle_event(core::event::Event::MouseRight(mouse_pt));
+            desktop.handle_event(Event::MouseRight(mouse_pt));
         } else if dragging {
-            desktop.handle_event(core::event::Event::MouseDrag(mouse_pt));
+            desktop.handle_event(Event::MouseDrag(mouse_pt));
         }
         if released {
-            desktop.handle_event(core::event::Event::MouseRelease);
+            desktop.handle_event(Event::MouseRelease);
         }
 
         if desktop.damage.is_dirty() {
@@ -158,4 +160,5 @@ fn user_main() -> i32 {
     desktop.session.exit_code()
 }
 
+#[cfg(not(test))]
 sarga_main!(user_main);

@@ -361,3 +361,102 @@ impl AppCatalog {
         result
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_launch_moves_to_front_and_caps_at_10() {
+        let mut cat = AppCatalog::new();
+        let n = cat.apps.len();
+        assert!(
+            n > 10,
+            "table should have more than 10 apps for the cap test"
+        );
+        for i in 0..n {
+            cat.record_launch(AppId(i));
+        }
+        assert_eq!(cat.recent.len(), 10);
+        assert_eq!(cat.recent.front(), Some(&(n - 1))); // most recent first
+        assert_eq!(cat.recent.back(), Some(&(n - 10)));
+        // Re-launch dedups and moves to the front without growing.
+        cat.record_launch(AppId(0));
+        assert_eq!(cat.recent.len(), 10);
+        assert_eq!(cat.recent.front(), Some(&0));
+        assert_eq!(cat.recent.iter().filter(|&&i| i == 0).count(), 1);
+    }
+
+    #[test]
+    fn filtered_all_matches_case_insensitive_substring() {
+        let cat = AppCatalog::new();
+        let hits = cat.filtered(AppCategory::All, b"TERM");
+        assert!(!hits.is_empty(), "Terminal must match 'TERM'");
+        for id in &hits {
+            let name = cat.get(*id).unwrap().name.to_ascii_lowercase();
+            assert!(name.contains("term"), "hit {} lacks 'term'", name);
+        }
+        // No match -> empty, no crash.
+        assert!(cat
+            .filtered(AppCategory::All, b"zzz-nothing-zzz")
+            .is_empty());
+    }
+
+    #[test]
+    fn filtered_category_excludes_other_categories() {
+        let cat = AppCatalog::new();
+        for cat_id in [
+            AppCategory::Games,
+            AppCategory::Network,
+            AppCategory::System,
+        ] {
+            let hits = cat.filtered(cat_id, b"");
+            assert!(!hits.is_empty(), "{:?} has no apps", cat_id);
+            for id in &hits {
+                assert_eq!(cat.get(*id).unwrap().category, cat_id);
+            }
+        }
+    }
+
+    #[test]
+    fn filtered_favorites_returns_only_pinned() {
+        let mut cat = AppCatalog::new();
+        let hits = cat.filtered(AppCategory::Favorites, b"");
+        assert!(hits.is_empty(), "nothing pinned by default");
+        cat.pinned[0] = true;
+        cat.pinned[5] = true;
+        let hits = cat.filtered(AppCategory::Favorites, b"");
+        assert!(hits.contains(&AppId(0)));
+        assert!(hits.contains(&AppId(5)));
+        assert!(hits.iter().all(|id| cat.pinned[id.0]));
+    }
+
+    #[test]
+    fn filtered_all_sorts_pinned_first_then_name() {
+        let mut cat = AppCatalog::new();
+        // Pin the last app (alphabetically it is not first) and assert it
+        // leads the All view ahead of every unpinned app.
+        let last = AppId(cat.apps.len() - 1);
+        cat.pinned[last.0] = true;
+        let hits = cat.filtered(AppCategory::All, b"");
+        assert_eq!(hits[0], last);
+        for id in &hits[1..] {
+            assert!(!cat.pinned[id.0]);
+        }
+        // The rest are in name order.
+        let names: Vec<&str> = hits[1..]
+            .iter()
+            .map(|id| cat.get(*id).unwrap().name)
+            .collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted);
+    }
+
+    #[test]
+    fn get_returns_none_out_of_range() {
+        let cat = AppCatalog::new();
+        assert!(cat.get(AppId(0)).is_some());
+        assert!(cat.get(AppId(cat.apps.len())).is_none());
+    }
+}

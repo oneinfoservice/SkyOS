@@ -1,6 +1,6 @@
 # How to Write and Run Tests
 
-The bare-metal targets have no `#[test]`-based harness, but **`libsarga`'s pure-logic `#[cfg(test)]` modules run on the host**: `cargo test -p libsarga` compiles the crate under `cfg(test)` with the std test harness (23 errno/net/semver tests). Testing is otherwise split across host-side suites, on-OS integration binaries, and QEMU boot tests. See `docs/testing/integration.md` for the full picture.
+The bare-metal targets have no `#[test]`-based harness, but **`libsarga`'s pure-logic `#[cfg(test)]` modules run on the host**: `cargo test -p libsarga` compiles the crate under `cfg(test)` with the std test harness (75 tests across errno/fs/gui/hash/net/png/semver/theme/toml). Testing is otherwise split across host-side suites, on-OS integration binaries, and QEMU boot tests. See `docs/testing/integration.md` for the full picture.
 
 ## Host-Side Suites (`tests/skyos-test`)
 
@@ -42,4 +42,4 @@ The kernel `self_test` feature emits TAP output (`ok`/`not ok`) to serial during
 
 ## Running in CI
 
-The GitHub Actions workflow (`.github/workflows/ci.yml`) runs `fmt`, `clippy`, `check-all-targets` (debug+release), and `integration-qemu`. The `host-tests` job also runs `cargo test -p libsarga` for libsarga's host unit tests.
+The GitHub Actions workflow (`.github/workflows/ci.yml`) runs `fmt`, `clippy`, `check-all-targets` (debug+release), and `integration-qemu`. The `host-tests` job also runs `cargo test -p libsarga` for libsarga's host unit tests, plus `tests/test_libsarga_host_coverage.py` to enforce per-module coverage (it fails if any pure-logic module has zero host tests).

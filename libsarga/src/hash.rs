@@ -106,7 +106,6 @@ pub fn verify_password(shadow_data: &[u8], username: &str, password: &str) -> bo
     false
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,7 +143,8 @@ mod tests {
     #[test]
     fn test_verify_password_rejects_bad_salt() {
         // Salt hex that is not exactly 16 bytes.
-        let shadow = b"alice:PBKDF2-00:00000000000000000000000000000000000000000000000000000000000000\n";
+        let shadow =
+            b"alice:PBKDF2-00:00000000000000000000000000000000000000000000000000000000000000\n";
         assert!(!verify_password(shadow, "alice", "pw"));
     }
 
@@ -165,4 +165,3 @@ mod tests {
         assert!(!verify_password(shadow, "alice", "pw"));
     }
 }
-

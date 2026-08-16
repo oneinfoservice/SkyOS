@@ -176,7 +176,7 @@ impl WindowManager {
         }
     }
 
-    pub fn snap_to_region(
+    pub(crate) fn snap_to_region(
         &mut self,
         id: WindowId,
         region: SnapRegion,

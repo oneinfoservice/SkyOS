@@ -3,4 +3,4 @@ pub(crate) mod desktop_api;
 pub(crate) mod explorer;
 pub(crate) mod log;
 pub(crate) mod profiler;
-pub(crate) mod testing;
+pub mod testing;

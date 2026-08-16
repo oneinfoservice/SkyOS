@@ -1162,11 +1162,34 @@ jobs:
 
       - name: libsarga host unit tests
         working-directory: SkyOS
-        # libsarga's errno/net/semver #[cfg(test)] modules run on the host:
-        # the crate's no_std/lang-item attributes are cfg_attr(not(test), ..),
-        # and .cargo/config.toml scopes build-std/panic=abort to the sarga
-        # target so the std test harness works here. No QEMU, no syscalls.
+        # libsarga's errno/fs/gui/hash/net/png/semver/theme/toml #[cfg(test)]
+        # modules run on the host: no_std is cfg_attr(not(test), ..), the
+        # lang items (panic handler, global allocator, alloc error handler)
+        # are gated on the sarga targets (os = "none") so they are absent on
+        # the host both under cfg(test) AND when the crate is a dependency of
+        # a host binary (dependencies never compile with cfg(test)). No QEMU,
+        # no syscalls.
         run: cargo test -p libsarga --lib
+
+      - name: libsarga host-test coverage (per-module counts)
+        working-directory: SkyOS
+        # Asks the real host test binary for its test list
+        # (`cargo test -p libsarga --lib -- --list`), prints per-module
+        # counts, and fails if any pure-logic module (errno/net/semver/hash/
+        # toml/png/theme) has zero tests — a #[cfg(test)] module that stops
+        # running, or a new pure-logic module added without tests, fails
+        # here instead of silently shrinking the suite.
+        run: python3 tests/test_libsarga_host_coverage.py
+
+      - name: ade host unit tests
+        working-directory: SkyOS
+        # ade's sys/{audio,display,input,network} and util/{app_catalog,
+        # explorer} #[cfg(test)] modules run on the host via the lib target
+        # (lib.rs uses the same cfg_attr(not(test), no_std) treatment as
+        # libsarga; main.rs is the bare-metal entrypoint only). Depends on
+        # the libsarga gating above: ade links libsarga, and dependencies
+        # are never compiled with cfg(test). 36 tests; no QEMU, no syscalls.
+        run: cargo test -p ade --lib
 
       - name: App wiring gate (initrd manifest <-> ade catalog)
         working-directory: SkyOS
@@ -1175,15 +1198,41 @@ jobs:
         # cross-checks the manifest against the catalog and cargo metadata.
         run: python3 tests/test_app_wiring.py
 
-      - name: skyos-test host framework (buddy allocator + PS/2 mouse)
+      - name: skyos-test host framework (buddy allocator, PS/2 mouse, VFS cache, futex, paging, pipe/sleep wait queues, ext2/tarfs)
         working-directory: SkyOS
         # The standalone host-side framework (tests/skyos-test + skyos-test-core,
         # outside the userspace workspace). Its runner exits non-zero on any
         # FAIL or an empty run, so a broken suite fails the job instead of
-        # printing '[FAIL]' and exiting 0. The summary grep is the
-        # belt-and-suspenders pin against output drift -- update BOTH when
-        # suites are added or removed.
+        # printing '[FAIL]' and exiting 0. The summary grep below is the
+        # belt-and-suspenders pin against output drift, and the per-category
+        # pins after it assert each suite's count individually -- a suite
+        # can't silently lose (or gain) tests while the total stays put.
+        # A new suite must add its own `category:count` pair here.
         run: |
           set -o pipefail
           cargo run --manifest-path tests/skyos-test/Cargo.toml -- run 2>&1 | tee skyos-test-log.txt
-          grep -q "Total: 17 | Passed: 17 | Failed: 0" skyos-test-log.txt
+          grep -q "Total: 85 | Passed: 85 | Failed: 0" skyos-test-log.txt
+          for pin in kernel::alloc:6 kernel::mouse:11 kernel::vfs:7 kernel::futex:12 kernel::paging:14 kernel::wait:15 kernel::fs:20; do
+            cat="${pin%:*}"; want="${pin##*:}"
+            out="$(cargo run --manifest-path tests/skyos-test/Cargo.toml -- run -c "$cat" 2>&1)"
+            echo "$out" >> skyos-test-log.txt
+            if ! echo "$out" | grep -q "Total: $want | Passed: $want | Failed: 0"; then
+              echo "::error::category $cat: expected $want passing tests, got:"
+              echo "$out" | tail -2
+              exit 1
+            fi
+          done
+
+      - name: skyos-test runner unit tests (timeout + CLI contract)
+        working-directory: SkyOS
+        # Hermetic #[cfg(test)] pins inside the standalone workspaces: the
+        # per-test timeout (a hung test's subprocess is KILLED after
+        # --timeout-ms instead of stalling the job forever), the total-run
+        # watchdog (--total-timeout-ms
+        # caps the SUM of all tests) and the CLI contract (unknown flags,
+        # subcommands, and stray positionals are hard non-zero exits, never
+        # silently ignored input). skyos-test-core is its own workspace root,
+        # so its manifest is invoked separately.
+        run: |
+          cargo test --manifest-path tests/skyos-test-core/Cargo.toml
+          cargo test --manifest-path tests/skyos-test/Cargo.toml

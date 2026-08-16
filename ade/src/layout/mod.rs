@@ -463,7 +463,7 @@ pub(crate) enum WindowHit {
 
 /// Classify a left-click position against a window's chrome. The control
 /// buttons win over the titlebar they are drawn on (see `WindowHit`).
-pub fn hit_window(x: i32, y: i32, w: u32, h: u32, pt: Point) -> WindowHit {
+pub(crate) fn hit_window(x: i32, y: i32, w: u32, h: u32, pt: Point) -> WindowHit {
     if close_btn_rect(x, y, w).hit_test(pt) {
         WindowHit::Close
     } else if min_btn_rect(x, y, w).hit_test(pt) {
@@ -514,7 +514,7 @@ pub(crate) enum SnapRegion {
 }
 
 /// The snap region under `(mx, my)` given the work area `(sw, ty)`.
-pub fn snap_region_at(mx: i32, my: i32, sw: i32, ty: i32) -> Option<SnapRegion> {
+pub(crate) fn snap_region_at(mx: i32, my: i32, sw: i32, ty: i32) -> Option<SnapRegion> {
     let edge_left = mx < SNAP_MARGIN;
     let edge_right = mx > sw - SNAP_MARGIN;
     let edge_top = my < SNAP_MARGIN;

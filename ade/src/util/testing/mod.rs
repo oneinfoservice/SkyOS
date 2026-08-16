@@ -15,7 +15,7 @@ pub(crate) mod terminal;
 pub(crate) mod theme;
 pub(crate) mod window;
 
-pub(crate) fn run_all(desktop: &mut crate::core::desktop::Desktop) -> bool {
+pub fn run_all(desktop: &mut crate::core::desktop::Desktop) -> bool {
     let mut ok = true;
     // Pure, deterministic input/keymap tests run first.
     ok &= input::test_keymap();

@@ -20,10 +20,10 @@ pub struct RenderSnapshot<'a> {
     pub screen_h: u32,
     pub theme: &'a libsarga::theme::Theme,
     pub windows: &'a [AppWindow],
-    pub icons: &'a [DesktopIcon],
+    pub(crate) icons: &'a [DesktopIcon],
     pub mouse: crate::core::geometry::Point,
     pub start_menu: bool,
-    pub start_menu_state: Option<&'a StartMenuState>,
+    pub(crate) start_menu_state: Option<&'a StartMenuState>,
     pub context_menu: Option<ContextMenu>,
     pub cursor_visible: bool,
     pub cursor_alpha: u8,
@@ -31,15 +31,15 @@ pub struct RenderSnapshot<'a> {
     pub switcher_active: bool,
     pub switcher_idx: usize,
     pub rubber: Option<RubberBand>,
-    pub notifications: &'a [Notification],
-    pub tray: &'a [crate::core::tray::TrayEntry],
-    pub clipboard: Option<&'a ClipboardManager>,
-    pub settings: Option<&'a SettingsState>,
-    pub app_reg: Option<&'a AppCatalog>,
+    pub(crate) notifications: &'a [Notification],
+    pub(crate) tray: &'a [crate::core::tray::TrayEntry],
+    pub(crate) clipboard: Option<&'a ClipboardManager>,
+    pub(crate) settings: Option<&'a SettingsState>,
+    pub(crate) app_reg: Option<&'a AppCatalog>,
     pub(crate) explorers: &'a [ExplorerState],
-    pub settings_app: Option<&'a SettingsAppState>,
-    pub task_manager: Option<&'a TaskManagerState>,
-    pub about: Option<&'a AboutState>,
+    pub(crate) settings_app: Option<&'a SettingsAppState>,
+    pub(crate) task_manager: Option<&'a TaskManagerState>,
+    pub(crate) about: Option<&'a AboutState>,
     pub focus_visible: bool,
     pub focused_bounds: Option<Rect>,
     /// The interactive surface under a11y keyboard focus (payload: the same
@@ -51,12 +51,12 @@ pub struct RenderSnapshot<'a> {
     /// One value replaces the former per-surface focus fields, so every
     /// draw site compares a single `hover || focused` equality against the
     /// same payloads it already uses for hover.
-    pub focused: Option<HoverTarget>,
+    pub(crate) focused: Option<HoverTarget>,
     /// The interactive surface under the pointer, computed once per frame
     /// by `Desktop::hover_target()` (window control buttons, taskbar,
     /// start menu, tray, clipboard rows). Every surface reads this instead
     /// of hit-testing the mouse position itself.
-    pub hover: Option<HoverTarget>,
+    pub(crate) hover: Option<HoverTarget>,
     /// Raw primary-mouse-button state for this frame. This is button state,
     /// NOT a per-surface decision: each surface combines it with its own
     /// `hover` equality check (e.g. `snap.mouse_down && snap.hover == ...`)
@@ -68,7 +68,7 @@ pub struct RenderSnapshot<'a> {
     /// Tooltip fade progress 0..=255 (fade-in on show, fade-out on dismiss).
     pub tooltip_alpha: u8,
     pub debug_overlay: bool,
-    pub debug_metrics: MetricsSnapshot,
+    pub(crate) debug_metrics: MetricsSnapshot,
     pub window_count: usize,
     pub notification_count: usize,
     pub snap_preview: Option<Rect>,

@@ -108,7 +108,7 @@ impl LifecycleManager {
 /// request would add its own code here.
 const EXIT_LOGOUT: i32 = 0;
 
-pub(crate) struct SessionManager {
+pub struct SessionManager {
     boot_tick: u64,
     pub(crate) lifecycle: LifecycleManager,
     ending: bool,
@@ -164,7 +164,7 @@ impl SessionManager {
     /// registries are unregistered, and the window manager drops the window
     /// (which also frees terminal pty masters). Returns true when at least
     /// one child was reaped so the caller can repaint.
-    pub fn reap(
+    pub(crate) fn reap(
         &mut self,
         wm: &mut WindowManager,
         services: &mut ServiceManager,

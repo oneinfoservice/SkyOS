@@ -243,7 +243,6 @@ pub fn decode_png(data: &[u8]) -> Option<PngImage> {
     })
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,16 +352,26 @@ mod tests {
 
     #[test]
     fn test_decode_paeth_filter_row() {
-        // One 2-pixel RGBA row encoded with filter type 4. NOTE: this
-        // decoder's paeth predictor is per-channel -- `a` is the same
-        // channel of the previous pixel (unfiltered[x - bpp]), not the
-        // adjacent byte -- so with a zero prev row pixel 0's channels all
-        // predict 0 (its raw bytes ARE the pixel), and pixel 1's deltas are
-        // against pixel 0's same-channel values. Pinned deliberately.
-        let raw = [4, 10, 20, 30, 255, 30, 30, 30, 0];
-        let img = decode_png(&png(2, 1, 8, 6, &raw, None, None)).unwrap();
+        // Two 2-pixel RGBA rows encoded with filter type 4, the PNG spec's
+        // Paeth filter (spec section 6.6): Paeth(x) = Raw(x) -
+        // PaethPredictor(Raw(x-bpp), Prior(x), Prior(x-bpp)), bpp = bytes
+        // per pixel. The predictor is PER-CHANNEL by spec -- `a` is the
+        // byte bpp positions back in the same row, NOT the adjacent byte
+        // (adjacent-byte is only correct for bpp == 1). The first row has
+        // a zero prior scanline (b = c = 0), so it exercises only `a`;
+        // the second row exercises all three inputs (a, b, and c). The
+        // filter bytes are the exact spec-encoded deltas, cross-checked
+        // against an independent reference encoder.
+        let raw = [
+            4, 10, 20, 30, 255, 30, 30, 30, 0, // row 0: (10,20,30,255) (40,50,60,255)
+            4, 90, 90, 90, 0, 100, 100, 100, 0, // row 1: (100,110,120,255) (200,210,220,255)
+        ];
+        let img = decode_png(&png(2, 2, 8, 6, &raw, None, None)).unwrap();
+        assert_eq!((img.width, img.height), (2, 2));
         assert_eq!(img.pixels[0], 0xFF000000 | (10 << 16) | (20 << 8) | 30);
         assert_eq!(img.pixels[1], 0xFF000000 | (40 << 16) | (50 << 8) | 60);
+        assert_eq!(img.pixels[2], 0xFF000000 | (100 << 16) | (110 << 8) | 120);
+        assert_eq!(img.pixels[3], 0xFF000000 | (200 << 16) | (210 << 8) | 220);
     }
 
     #[test]

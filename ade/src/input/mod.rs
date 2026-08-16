@@ -92,8 +92,12 @@ impl KeyEvent {
             keys::KEY_ENTER | keys::KEY_LF | keys::SCAN_ENTER => (keys::KEY_ENTER, false),
             keys::KEY_TAB => (keys::KEY_TAB, false),
             keys::KEY_BACKSPACE | keys::KEY_BACKSPACE_ALT => (keys::KEY_BACKSPACE, false),
-            1..=26 => (b'a' - 1 + b, true), // Ctrl+letter
-            _ => (b, false),
+            // Ctrl+letter: the fold/unfold contract lives in sys::input so
+            // the host tests pin the exact decode (1..=26 -> 'a'..='z').
+            _ => match crate::sys::input::unfold_ctrl(b) {
+                Some(letter) => (letter, true),
+                None => (b, false),
+            },
         };
         KeyEvent::new(code, ctrl, false, false)
     }
@@ -128,7 +132,7 @@ impl KeyEvent {
     /// rejected too: the producer folds shift into the character (Shift+a
     /// arrives as 'A'), so a synthetic shift-modified event is not text.
     pub fn text(&self) -> Option<char> {
-        if self.ctrl || self.alt || self.shift || !(0x20..=0x7E).contains(&self.code) {
+        if self.ctrl || self.alt || self.shift || !crate::sys::input::is_printable(self.code) {
             return None;
         }
         Some(self.code as char)
@@ -367,7 +371,7 @@ pub(crate) fn is_desktop_shortcut(ev: KeyEvent) -> bool {
 /// directly — so a table edit that makes a binding unreachable, or that
 /// re-adds a session-end binding, shows up here before any QEMU run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct BindingDump {
+pub struct BindingDump {
     /// Number of distinct (code, ctrl, alt, shift) events that resolve to a
     /// desktop action — i.e. the number of reachable binding rows.
     pub count: u32,
@@ -399,7 +403,7 @@ pub(crate) struct BindingDump {
 /// selftest first in the suite, before any QEMU run. Cost is trivial:
 /// 2,048 `resolve` + 2,048 `is_desktop_shortcut` calls against a 17-row
 /// table.
-pub(crate) fn dump_bindings() -> BindingDump {
+pub fn dump_bindings() -> BindingDump {
     let mut count: u32 = 0;
     let mut quit_count: u32 = 0;
     let mut desktop_grabs: u32 = 0;

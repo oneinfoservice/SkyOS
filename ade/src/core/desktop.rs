@@ -106,7 +106,7 @@ pub struct Desktop {
     pub(crate) wm: WindowManager,
     pub(crate) start_menu: StartMenuState,
     pub(crate) context_menu: Option<ContextMenu>,
-    pub(crate) clock_ticks: u64,
+    pub clock_ticks: u64,
     pub(crate) mouse_x: i32,
     pub(crate) mouse_y: i32,
     mouse_btn: bool,
@@ -124,7 +124,7 @@ pub struct Desktop {
     pub(crate) double_click: bool,
     pub(crate) desktop_icons: DesktopIcons,
     pub(crate) theme_svc: crate::core::theme_service::ThemeService,
-    pub(crate) damage: DamageTracker,
+    pub damage: DamageTracker,
     pub(crate) clock_cache: crate::render::clock::ClockCache,
     tiling_mode: TilingMode,
     prev_tiling_geos: alloc::vec::Vec<Rect>,
@@ -132,7 +132,7 @@ pub struct Desktop {
     pub(crate) switcher_active: bool,
     pub(crate) switcher_idx: usize,
     pub(crate) app_reg: crate::util::app_catalog::AppCatalog,
-    pub(crate) session: crate::service::session::SessionManager,
+    pub session: crate::service::session::SessionManager,
     pub(crate) services: crate::service::service_manager::ServiceManager,
     pub(crate) tray: SystemTray,
     pub(crate) settings: crate::core::settings::SettingsState,
@@ -2226,14 +2226,14 @@ impl Desktop {
             .map(|sp| Rect::new(sp.x, sp.y, sp.w, sp.h))
     }
 
-    pub(crate) fn prepare_clock(&mut self) -> alloc::string::String {
+    pub fn prepare_clock(&mut self) -> alloc::string::String {
         alloc::string::String::from(crate::render::clock::format_time(
             self.clock_ticks,
             &mut self.clock_cache,
         ))
     }
 
-    pub fn permission_check(
+    pub(crate) fn permission_check(
         &self,
         app: crate::ipc::ApplicationId,
         perm: crate::ipc::permission::AppPermission,

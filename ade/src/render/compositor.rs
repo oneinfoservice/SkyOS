@@ -545,7 +545,7 @@ impl LayerBuffer {
 
 // ── Compositor ──────────────────────────────────────────────────────────────
 
-pub(crate) struct Compositor {
+pub struct Compositor {
     layers: [LayerBuffer; LAYER_COUNT],
     w: u32,
     h: u32,
@@ -578,12 +578,12 @@ impl Compositor {
     }
 
     /// Clear a single layer buffer.
-    pub fn clear_layer(&mut self, layer: Layer) {
+    pub(crate) fn clear_layer(&mut self, layer: Layer) {
         self.layers[layer as usize].clear();
     }
 
     /// Return a [`Canvas`] that writes into the given layer's buffer.
-    pub fn layer_canvas(&mut self, layer: Layer) -> Canvas<'_> {
+    pub(crate) fn layer_canvas(&mut self, layer: Layer) -> Canvas<'_> {
         let buf = &mut self.layers[layer as usize].buf;
         Canvas {
             data: buf.as_mut_slice(),

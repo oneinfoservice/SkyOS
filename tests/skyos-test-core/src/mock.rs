@@ -9,6 +9,12 @@ pub struct MockPort {
     write_log: RefCell<HashMap<u16, Vec<u8>>>,
 }
 
+impl Default for MockPort {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockPort {
     pub fn new() -> Self {
         MockPort {
@@ -138,6 +144,12 @@ impl MockPhysMem {
 pub struct MockHarness {
     pub ports: MockPort,
     pub phys_mem: MockPhysMem,
+}
+
+impl Default for MockHarness {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MockHarness {

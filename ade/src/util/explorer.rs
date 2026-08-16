@@ -825,3 +825,98 @@ fn draw_details(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(name: &str, is_dir: bool, size: u64, modified: u64) -> VfsEntry {
+        VfsEntry {
+            name: String::from(name),
+            path: String::from(name),
+            is_dir,
+            size,
+            modified,
+        }
+    }
+
+    #[test]
+    fn sort_entries_dirs_first_then_name() {
+        let mut v = vec![
+            entry("b.txt", false, 1, 1),
+            entry("a_dir", true, 9, 9),
+            entry("A.txt", false, 2, 2),
+        ];
+        sort_entries(&mut v, 0, false);
+        assert!(v[0].is_dir);
+        assert_eq!(v[1].name, "A.txt"); // case-insensitive: a.txt before b.txt
+        assert_eq!(v[2].name, "b.txt");
+    }
+
+    #[test]
+    fn sort_entries_by_size_and_date() {
+        let mut v = vec![
+            entry("big", false, 300, 100),
+            entry("small", false, 1, 900),
+            entry("mid", false, 200, 500),
+        ];
+        sort_entries(&mut v, 1, false);
+        assert_eq!(v[0].name, "small");
+        assert_eq!(v[2].name, "big");
+        sort_entries(&mut v, 1, true);
+        assert_eq!(v[0].name, "big");
+        sort_entries(&mut v, 2, true);
+        assert_eq!(v[0].name, "small"); // newest modified first
+    }
+
+    #[test]
+    fn sort_entries_by_extension() {
+        let mut v = vec![
+            entry("a.rs", false, 0, 0),
+            entry("b.txt", false, 0, 0),
+            entry("c.rs", false, 0, 0),
+        ];
+        sort_entries(&mut v, 3, false);
+        assert_eq!(v[0].name, "a.rs");
+        assert_eq!(v[1].name, "c.rs");
+        assert_eq!(v[2].name, "b.txt");
+    }
+
+    #[test]
+    fn sort_entries_unknown_mode_is_noop() {
+        let mut v = vec![entry("b", false, 0, 0), entry("a", false, 0, 0)];
+        sort_entries(&mut v, 99, false);
+        assert_eq!(v[0].name, "b"); // unchanged (dirs-first is still applied, both files)
+    }
+
+    #[test]
+    fn format_size_units() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(1023), "1023 B");
+        assert_eq!(format_size(1024), "1.0 KB");
+        assert_eq!(format_size(1536), "1.5 KB");
+        assert_eq!(format_size(1024 * 1024), "1.0 MB");
+        assert_eq!(format_size(1024 * 1024 * 1024), "1.0 GB");
+        assert_eq!(
+            format_size(1024 * 1024 * 1024 + 150 * 1024 * 1024),
+            "1.1 GB"
+        );
+    }
+
+    #[test]
+    fn format_date_epoch_and_day() {
+        assert_eq!(format_date(0), "1970-01-01");
+        assert_eq!(format_date(86400), "1970-01-02");
+    }
+
+    #[test]
+    fn status_text_empty_and_selected() {
+        let mut st = ExplorerState::new(1, "/home");
+        assert_eq!(st.status_text(), "0 items  ");
+        st.tabs[st.active_tab].sel_idx = Some(0);
+        assert_eq!(st.status_text(), "0 items  1 selected");
+        st.search_active = true;
+        st.search_results = vec![entry("x", false, 1, 1)];
+        assert_eq!(st.status_text(), "1 items  1 selected");
+    }
+}

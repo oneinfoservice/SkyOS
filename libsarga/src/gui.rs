@@ -896,3 +896,92 @@ impl Window {
         crate::io::move_window(self.id, x, y);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alpha_blend_opaque_and_transparent() {
+        assert_eq!(alpha_blend(0x112233, 0x445566, 0), 0x112233);
+        assert_eq!(alpha_blend(0x112233, 0x445566, 255), 0x445566);
+    }
+
+    #[test]
+    fn alpha_blend_white_over_black_halves() {
+        // 128/255: exactly mid gray. (255*128 + 0*127)/255 == 128 per channel.
+        assert_eq!(alpha_blend(0x000000, 0xFFFFFF, 128), 0x808080);
+        assert_eq!(alpha_blend(0x000000, 0xFFFFFF, 64), 0x404040);
+    }
+
+    #[test]
+    fn alpha_blend_exact_one_third_blend() {
+        // 85 == 255/3: blending (0x40,0x50,0x60) over (0x10,0x20,0x30)
+        // lands exactly one third of the way: (0x20,0x30,0x40).
+        assert_eq!(alpha_blend(0x102030, 0x405060, 85), 0x203040);
+    }
+
+    #[test]
+    fn glyph_cache_insert_get_and_miss() {
+        let mut c = GlyphCache::new(4);
+        assert!(c.get(1, 10).is_none());
+        c.insert(
+            1,
+            10,
+            CacheEntry {
+                width: 4,
+                height: 8,
+                bearing_x: 0,
+                bearing_y: -2,
+                advance: 6,
+                data: alloc::vec![1, 2, 3],
+            },
+        );
+        let got = c.get(1, 10).unwrap();
+        assert_eq!((got.width, got.height, got.advance), (4, 8, 6));
+        assert_eq!(got.data, alloc::vec![1, 2, 3]);
+        // Same glyph at another size, and another glyph at the same size,
+        // are distinct cache keys.
+        assert!(c.get(1, 11).is_none());
+        assert!(c.get(2, 10).is_none());
+    }
+
+    #[test]
+    fn glyph_cache_evicts_lowest_key_at_capacity() {
+        let e = |w: u16| CacheEntry {
+            width: w,
+            height: 1,
+            bearing_x: 0,
+            bearing_y: 0,
+            advance: 1,
+            data: alloc::vec![],
+        };
+        let mut c = GlyphCache::new(2);
+        c.insert(5, 5, e(1));
+        c.insert(3, 3, e(2));
+        // At capacity, insert evicts the lowest (glyph_id, size) key
+        // currently present -- here (3,3) -- before the new entry lands.
+        c.insert(1, 1, e(3));
+        assert!(c.get(3, 3).is_none());
+        assert!(c.get(5, 5).is_some());
+        assert!(c.get(1, 1).is_some());
+        // Replacing an existing key at capacity still evicts the lowest
+        // key FIRST (eviction runs before the insert), so (1,1) is gone
+        // and the replacement (5,5) is the only survivor.
+        c.insert(5, 5, e(9));
+        assert_eq!(c.get(5, 5).unwrap().width, 9);
+        assert!(c.get(1, 1).is_none());
+        assert_eq!(c.entries.len(), 1);
+    }
+
+    #[test]
+    fn bitmap_font_metrics() {
+        let f = Font::bitmap();
+        assert_eq!(f.advance('a', 16), 8);
+        assert_eq!(f.advance('€', 16), 8); // any glyph, fixed 8px cell
+        assert_eq!(f.text_width("hello", 16), 40);
+        assert_eq!(f.text_width("", 16), 0);
+        assert_eq!(f.line_height(16), 16);
+        assert_eq!(f.line_height(32), 32);
+    }
+}

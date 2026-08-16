@@ -1,7 +1,7 @@
 //! Render pipeline — composite layers via the compositor onto the window surface.
 
 pub(crate) mod clock;
-pub(crate) mod compositor;
+pub mod compositor;
 pub(crate) mod layer;
 pub(crate) mod notification_overlay;
 pub(crate) mod overlay;
@@ -11,7 +11,7 @@ use alloc::format;
 use compositor::Compositor;
 use layer::Layer;
 
-pub(crate) fn render(
+pub fn render(
     win: &mut libsarga::gui::Window,
     snap: &snapshot::RenderSnapshot,
     clock_str: &str,
