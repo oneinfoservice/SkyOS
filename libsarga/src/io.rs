@@ -241,6 +241,50 @@ pub fn read_to_string(path: &str) -> Result<String, Error> {
     Ok(result)
 }
 
+/// Reads an entire file into a byte buffer. Single home for the
+/// read-whole-file loop previously duplicated in `login` and `passwd`
+/// (each had a private `read_whole_file`); both now call this.
+pub fn read_to_end(path: &str) -> Result<Vec<u8>, Error> {
+    let fd = open(path, 0)?;
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 512];
+    loop {
+        match read(fd, &mut tmp) {
+            Ok(0) => break,
+            Ok(n) => buf.extend_from_slice(&tmp[..n]),
+            // Close on the error path too: this is the shared whole-file
+            // reader for login/passwd/su, so a mid-file read error must not
+            // leak the descriptor (the originals' `?` did).
+            Err(e) => {
+                let _ = close(fd);
+                return Err(e);
+            }
+        }
+    }
+    let _ = close(fd);
+    Ok(buf)
+}
+
+/// Read ALL of stdin (fd 0) until EOF into a raw byte Vec.
+///
+/// Stops on the first read error and returns the bytes read so far -- the
+/// exact semantics of the per-tool stdin loops this consolidates (every
+/// caller previously did `Err(_) => break` and used the partial buffer).
+/// Returns a plain Vec (not Result) deliberately: the consolidated tools
+/// all treated a read error as EOF and never surfaced it.
+pub fn read_stdin_all_bytes() -> Vec<u8> {
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 1024];
+    loop {
+        match read(0, &mut tmp) {
+            Ok(0) => break,
+            Ok(n) => buf.extend_from_slice(&tmp[..n]),
+            Err(_) => break,
+        }
+    }
+    buf
+}
+
 /// Prints a string to standard output.
 pub fn print_str(s: &str) {
     let _ = write_all(1, s.as_bytes());
@@ -931,7 +975,7 @@ pub mod ioctls {
 /// Perform an ioctl on a file descriptor. `argp` is a caller-owned buffer
 /// whose contents are interpreted per-request (e.g. the termios struct the
 /// caller owns for TCGETS/TCSETS — no `Termios` type is defined here; the
-/// layout lives with the consumer, `login/src/main.rs`, mirrored from the
+/// layout lives with the consumer, `libsarga::tty`, mirrored from the
 /// kernel's `sys_ioctl`). Returns the ioctl return value (usually 0 on
 /// success).
 pub fn ioctl(fd: i64, request: u64, argp: *mut u8) -> Result<i64, Error> {

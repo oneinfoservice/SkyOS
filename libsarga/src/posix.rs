@@ -44,7 +44,7 @@ pub const WUNTRACED: i32 = 2;
 
 // ELF magic
 const ELF_MAGIC: [u8; 4] = [0x7f, b'E', b'L', b'F'];
-const SHEBANG: [u8; 2] = [b'#', b'!'];
+const SHEBANG: [u8; 2] = *b"#!";
 
 /// Detect if a file starts with a shebang and extract interpreter+arg.
 pub fn shebang_interpreter(data: &[u8]) -> Option<(&str, Option<&str>)> {

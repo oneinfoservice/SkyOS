@@ -1,7 +1,10 @@
 use crate::errno::Error;
+#[cfg(target_os = "none")]
 use crate::sync::RawMutex;
 use crate::syscall::*;
+#[cfg(target_os = "none")]
 use core::alloc::{GlobalAlloc, Layout};
+#[cfg(target_os = "none")]
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 /// # Safety
@@ -47,14 +50,20 @@ pub fn brk(addr: u64) -> u64 {
     unsafe { crate::syscall::syscall1(12, addr) as u64 }
 }
 
+// The allocator machinery and runtime shims below are only needed on the
+// sarga targets (os = "none"): std/libc already provide all of it on the
+// host, where a second definition would be dead code or a symbol clash.
+#[cfg(target_os = "none")]
 /// Slab allocator for small objects to reduce mmap overhead
 const SLAB_SIZES: &[usize] = &[8, 16, 32, 64, 128, 256, 512, 1024, 2048];
 
+#[cfg(target_os = "none")]
 struct SlabAllocator {
     free_lists: [AtomicUsize; SLAB_SIZES.len()], // Each stores a pointer to free list head
     lock: RawMutex,
 }
 
+#[cfg(target_os = "none")]
 impl SlabAllocator {
     const fn new() -> Self {
         // ponytail: const-local to repeat into the array; not a global
@@ -101,10 +110,12 @@ impl SlabAllocator {
     }
 }
 
+#[cfg(target_os = "none")]
 pub struct SargaMapper {
     slab: SlabAllocator,
 }
 
+#[cfg(target_os = "none")]
 impl SargaMapper {
     const fn new() -> Self {
         SargaMapper {
@@ -113,6 +124,7 @@ impl SargaMapper {
     }
 }
 
+#[cfg(target_os = "none")]
 unsafe impl GlobalAlloc for SargaMapper {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // Try slab allocator for small objects
@@ -143,6 +155,7 @@ unsafe impl GlobalAlloc for SargaMapper {
 }
 
 #[cfg(target_os = "none")]
+#[cfg(target_os = "none")]
 #[global_allocator]
 pub static ALLOCATOR: SargaMapper = SargaMapper::new();
 
@@ -157,6 +170,7 @@ fn alloc_error_handler(layout: core::alloc::Layout) -> ! {
     panic!("allocation error: {:?}", layout)
 }
 
+#[cfg(target_os = "none")]
 #[cfg_attr(not(test), no_mangle)]
 /// # Safety
 /// Caller must ensure `dest`/`src` point to valid, non-overlapping regions of
@@ -168,6 +182,7 @@ pub unsafe extern "C" fn memcpy(dest: *mut u8, src: *const u8, n: usize) -> *mut
     dest
 }
 
+#[cfg(target_os = "none")]
 #[cfg_attr(not(test), no_mangle)]
 /// # Safety
 /// Caller must ensure `s` points to a valid writable region of at least `n`
@@ -179,6 +194,7 @@ pub unsafe extern "C" fn memset(s: *mut u8, c: i32, n: usize) -> *mut u8 {
     s
 }
 
+#[cfg(target_os = "none")]
 #[cfg_attr(not(test), no_mangle)]
 /// # Safety
 /// Caller must ensure `s1`/`s2` point to valid readable regions of at least
@@ -404,6 +420,7 @@ pub fn swapoff(path: &str) -> Result<(), Error> {
     }
 }
 
+#[cfg(target_os = "none")]
 #[cfg_attr(not(test), no_mangle)]
 /// # Safety
 /// Caller must ensure `dest`/`src` point to valid regions of at least `n`

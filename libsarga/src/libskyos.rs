@@ -67,8 +67,8 @@ pub fn list_dir(path: &str) -> Option<Vec<String>> {
             _ => break,
         };
         let mut off = 0;
-        while off < n as usize {
-            if off + 18 > n as usize {
+        while off < n {
+            if off + 18 > n {
                 break;
             }
             let d_ino = u64::from_ne_bytes(buf[off..off + 8].try_into().unwrap());

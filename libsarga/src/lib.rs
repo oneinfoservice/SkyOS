@@ -12,6 +12,7 @@ pub extern crate alloc;
 
 pub mod ai;
 pub mod args;
+pub mod auth;
 pub mod config;
 pub mod errno;
 pub mod fs;
@@ -35,6 +36,7 @@ pub mod syscall;
 pub mod thread;
 pub mod time;
 pub mod toml;
+pub mod tty;
 pub mod vahiai;
 pub mod version;
 
