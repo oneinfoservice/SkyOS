@@ -142,15 +142,20 @@ unsafe impl GlobalAlloc for SargaMapper {
     }
 }
 
+#[cfg(not(test))]
 #[global_allocator]
 pub static ALLOCATOR: SargaMapper = SargaMapper::new();
 
+// The allocator lang items must not be defined when the crate is compiled for
+// the host test harness: std already provides both, and a second definition is
+// E0152 duplicate lang item.
+#[cfg(not(test))]
 #[alloc_error_handler]
 fn alloc_error_handler(layout: core::alloc::Layout) -> ! {
     panic!("allocation error: {:?}", layout)
 }
 
-#[no_mangle]
+#[cfg_attr(not(test), no_mangle)]
 /// # Safety
 /// Caller must ensure `dest`/`src` point to valid, non-overlapping regions of
 /// at least `n` bytes each.
@@ -161,7 +166,7 @@ pub unsafe extern "C" fn memcpy(dest: *mut u8, src: *const u8, n: usize) -> *mut
     dest
 }
 
-#[no_mangle]
+#[cfg_attr(not(test), no_mangle)]
 /// # Safety
 /// Caller must ensure `s` points to a valid writable region of at least `n`
 /// bytes.
@@ -172,7 +177,7 @@ pub unsafe extern "C" fn memset(s: *mut u8, c: i32, n: usize) -> *mut u8 {
     s
 }
 
-#[no_mangle]
+#[cfg_attr(not(test), no_mangle)]
 /// # Safety
 /// Caller must ensure `s1`/`s2` point to valid readable regions of at least
 /// `n` bytes each.
@@ -397,7 +402,7 @@ pub fn swapoff(path: &str) -> Result<(), Error> {
     }
 }
 
-#[no_mangle]
+#[cfg_attr(not(test), no_mangle)]
 /// # Safety
 /// Caller must ensure `dest`/`src` point to valid regions of at least `n`
 /// bytes; regions may overlap.

@@ -1,5 +1,5 @@
-#[no_mangle]
-#[link_section = ".text._start"]
+#[cfg_attr(not(test), no_mangle)]
+#[cfg_attr(not(test), link_section = ".text._start")]
 /// # Safety
 /// Caller must pass a valid initial stack pointer with argc at offset 0 and the
 /// argv pointer array laid out immediately after it.

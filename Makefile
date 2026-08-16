@@ -17,14 +17,17 @@ all: fmt clippy build
 fmt:
 	cargo fmt --check
 
+# -Zbuild-std is explicit here (not in .cargo/config.toml): the sarga
+# target has no precompiled sysroot, and a global build-std breaks host
+# builds such as `cargo test -p libsarga`.
 clippy:
-	cargo clippy --target x86_64-sarga.json -- -D warnings
+	cargo clippy -Zbuild-std=core,alloc --target x86_64-sarga.json -- -D warnings
 
 build:
-	cargo build --target x86_64-sarga.json
+	cargo build -Zbuild-std=core,alloc --target x86_64-sarga.json
 
 build-release:
-	cargo build --target x86_64-sarga.json --release
+	cargo build -Zbuild-std=core,alloc --target x86_64-sarga.json --release
 
 # NOTE: Make runs each dep regardless of prior failure. Use && if you need isolation.
 test: fmt clippy build-release qemu-test

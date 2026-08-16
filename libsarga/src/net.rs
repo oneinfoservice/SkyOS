@@ -176,6 +176,22 @@ pub fn parse_ipv6(s: &str) -> Option<[u8; 16]> {
         idx += 1;
     }
     let has_dc = idx > p_len;
+    // `::` compresses exactly ONE run of empty groups; split(':') renders that
+    // as 1 empty part (interior `::`), 2 empty parts (boundary `::`, e.g.
+    // "::1" or "1::"), or 3 empty parts covering the whole string (the bare
+    // "::" all-zero address). Anything else -- ":::1", "a:::b", ":", ":::"
+    // -- is malformed and must not parse.
+    let run_len = idx - p_len;
+    let run_covers_all = p_len == 0 && idx == parts.len();
+    // A 2-empty run is only the split artifact of a boundary `::` ("::1",
+    // "1::"); interior "1:::2" is malformed.
+    let valid_dc = !has_dc
+        || run_len == 1
+        || (run_len == 2 && (p_len == 0 || idx == parts.len()) && !run_covers_all)
+        || (run_len == 3 && run_covers_all);
+    if !valid_dc {
+        return None;
+    }
     // suffix after ::
     let mut suffix = [0u16; 8];
     let mut s_len = 0;
@@ -589,7 +605,8 @@ mod tests {
         let a = ip.unwrap();
         assert_eq!(a[0..2], [0x20, 0x01]);
         assert_eq!(a[2..4], [0x0d, 0xb8]);
-        assert_eq!(a[14..16], [0x07, 0x34]);
+        // "7334" parses as 0x7334, i.e. bytes [0x73, 0x34]
+        assert_eq!(a[14..16], [0x73, 0x34]);
     }
 
     #[test]
@@ -597,6 +614,27 @@ mod tests {
         assert_eq!(parse_ipv6(""), None);
         assert_eq!(parse_ipv6("not:valid"), None);
         assert_eq!(parse_ipv6(":::1"), None);
+        assert_eq!(parse_ipv6(":::"), None);
+        assert_eq!(parse_ipv6(":"), None);
+        assert_eq!(parse_ipv6("1:::2"), None);
+        assert_eq!(parse_ipv6("1::2::3"), None);
+        assert_eq!(parse_ipv6("1:2:3:4:5:6:7"), None);
+    }
+
+    #[test]
+    fn test_parse_ipv6_double_colon_boundaries() {
+        // The all-zero address written as the bare "::".
+        assert_eq!(parse_ipv6("::"), Some([0u8; 16]));
+        // Boundary :: on the right: 1:0:0:0:0:0:0:0 (group 1 leads)
+        let mut expected = [0u8; 16];
+        expected[0] = 0x00;
+        expected[1] = 1;
+        assert_eq!(parse_ipv6("1::"), Some(expected));
+        // Interior :: with groups on both sides.
+        let ip = parse_ipv6("1::2");
+        let a = ip.unwrap();
+        assert_eq!(a[0..2], [0, 1]);
+        assert_eq!(a[14..16], [0, 2]);
     }
 
     #[test]

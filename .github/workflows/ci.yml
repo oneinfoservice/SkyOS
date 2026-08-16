@@ -1094,3 +1094,29 @@ jobs:
       - name: Probe expect-consume semantics contract test
         working-directory: SkyOS
         run: python3 tests/test_probe_consume.py
+
+      - name: Install nightly (for libsarga host unit tests)
+        run: |
+          rustup toolchain install nightly-2026-01-15 --allow-downgrade
+          rustup default nightly-2026-01-15
+
+      - name: libsarga host unit tests
+        working-directory: SkyOS
+        # libsarga's errno/net/semver #[cfg(test)] modules run on the host:
+        # the crate's no_std/lang-item attributes are cfg_attr(not(test), ..),
+        # and .cargo/config.toml scopes build-std/panic=abort to the sarga
+        # target so the std test harness works here. No QEMU, no syscalls.
+        run: cargo test -p libsarga --lib
+
+      - name: skyos-test host framework (buddy allocator + PS/2 mouse)
+        working-directory: SkyOS
+        # The standalone host-side framework (tests/skyos-test + skyos-test-core,
+        # outside the userspace workspace). Its runner exits non-zero on any
+        # FAIL or an empty run, so a broken suite fails the job instead of
+        # printing '[FAIL]' and exiting 0. The summary grep is the
+        # belt-and-suspenders pin against output drift -- update BOTH when
+        # suites are added or removed.
+        run: |
+          set -o pipefail
+          cargo run --manifest-path tests/skyos-test/Cargo.toml -- run 2>&1 | tee skyos-test-log.txt
+          grep -q "Total: 17 | Passed: 17 | Failed: 0" skyos-test-log.txt

@@ -67,7 +67,11 @@ def ensure_nightly_wrapper(nightly_cargo):
 def build_userspace(root_dir, release=False):
     log("1/4", "Building userspace")
     target = "x86_64-sarga.json"
-    cmd = ["cargo", "build", "--target", target]
+    # The sarga target has no precompiled sysroot libs, so core/alloc are
+    # built from source; -Zbuild-std is passed explicitly (the workspace
+    # .cargo/config.toml must not set a global build-std, which would break
+    # host builds like `cargo test -p libsarga`).
+    cmd = ["cargo", "build", "-Zbuild-std=core,alloc", "--target", target]
     if release:
         cmd.append("--release")
     run(cmd, cwd=root_dir,

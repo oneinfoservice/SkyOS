@@ -10,7 +10,7 @@ echo "--- Velox Kernel Bootimage Builder ---"
 # 1. Build the kernel
 echo "Building kernel..."
 cd kernel
-cargo build --target x86_64-unknown-none
+cargo build -Zbuild-std=core,alloc --target x86_64-unknown-none
 cd ..
 
 # 2. Run the image builder

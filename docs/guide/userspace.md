@@ -25,8 +25,11 @@ fn main() {
 }
 ```
 
-Programs are built with `cargo build --target x86_64-sarga.json` from the workspace root; the
-build is orchestrated by `build_disk.py` (`cargo build --target x86_64-sarga.json --release`).
+Programs are built with `cargo build -Zbuild-std=core,alloc --target x86_64-sarga.json` from the
+workspace root (the sarga target has no precompiled sysroot, so `core`/`alloc` are built from
+source; `.cargo/config.toml` does not set a global `build-std` because that breaks host builds
+such as `cargo test -p libsarga`). The build is orchestrated by `build_disk.py`
+(`cargo build -Zbuild-std=core,alloc --target x86_64-sarga.json --release`).
 
 ## Loading and Execution
 

@@ -30,7 +30,7 @@ Commit `3216775` ("fix(userspace): audit-verified bug fixes, ADE refactor, and c
 - **D1 (unused ADE scaffold modules)** — **RESOLVED.** The `ade/src/sys/{session,session_service,login_session,notification,power}.rs` files and `ade/src/util/clipboard_service.rs` were deleted.
 - **D2 (permission constant table collision)** — **RESOLVED.** The duplicate `PERM_*` table in `ade/src/sec/perms.rs` was removed; the live constants live only in `ade/src/ipc/permission.rs`.
 - **D3 (password verification duplication)** — **RESOLVED.** `verify_password`/`hex_decode` are consolidated in `libsarga/src/hash.rs` and used by both `login` and `login-manager`. `hex_decode` now wraps the `hex` crate.
-- **T1 (zero unit tests)** — **STALE.** `libsarga` now contains host-runnable `#[cfg(test)]` modules (e.g. `errno.rs`, `net.rs`, `semver.rs`) with pure-logic `#[test]` functions.
+- **T1 (zero unit tests)** — **RESOLVED.** `libsarga`'s `#[cfg(test)]` modules (`errno.rs`, `net.rs`, `semver.rs`) compile and run on the host: `cargo test -p libsarga` runs 23 tests, wired into the CI `host-tests` job. `libsarga/src/lib.rs` gates its `no_std`/lang items with `cfg_attr(not(test), ..)`/`#[cfg(not(test))]`, and `.cargo/config.toml` scopes `build-std`/`panic=abort` to the sarga target so the std test harness works.
 - **B2 (x86_64-vahi "legacy" naming)** — **STALE/FALSE.** `x86_64-vahi` is the kernel crate's real build target (`kernel/target/x86_64-vahi` exists); scripts referencing it are not stale. The `velox` references were removed.
 
 ---
@@ -200,9 +200,9 @@ The following claims in SKYOS_DEV_REPORT.md Section 4 and 6 were verified as **F
 - **File:** `Cargo.toml:3-45`
 - **Description:** Zero `#[test]` functions exist in any workspace crate (libsarga, ade, coreutils, sash, etc.). The only `#[test]` matches are in `target/x86_64-sarga/doc/` which are from the `ttf_parser` dependency, not project code.
 - **Workspace Exclusion:** `tests/skyos-test` and `tests/skyos-test-core` crates exist but are excluded from workspace members in `Cargo.toml`.
-- **CI:** `.github/workflows/ci.yml` runs `fmt`, `clippy`, and build only - no `cargo test` step.
+- **CI:** `.github/workflows/ci.yml` runs `fmt`, `clippy`, build, and the `host-tests` job's `cargo test -p libsarga` (libsarga's errno/net/semver unit tests).
 - **Severity:** HIGH
-- **Verification Status:** **STALE** — see Resolution Update. `libsarga` now ships host-runnable `#[cfg(test)]` modules.
+- **Verification Status:** **RESOLVED** — `cargo test -p libsarga` runs 23 host tests; see Resolution Update.
 - **Remediation Phase:** Phase 4
 
 ---
@@ -262,10 +262,7 @@ The following claims in SKYOS_DEV_REPORT.md Section 4 and 6 were verified as **F
    - Adopt `spkg` as canonical package manager name
    - Update references to `sargash` and `skypkg` in CI, scripts, app registries
 
-4. **Wire unit-test path or document gap** (T1) — **OPEN** (partial: `libsarga` now has host-runnable `#[cfg(test)]` modules)
-   - Add `tests/skyos-test-core` to workspace members OR document why excluded
-   - Add `cargo test` step to CI if host-side testing is feasible
-   - If not feasible, document that kernel self-tests are the only test path and unit testing is blocked by bare-metal target
+4. **Wire unit-test path or document gap** (T1) — **RESOLVED** — `libsarga`'s errno/net/semver `#[cfg(test)]` modules compile and run on the host via `cargo test -p libsarga` (23 tests), with a matching step in the CI `host-tests` job. `tests/skyos-test`/`skyos-test-core` remain excluded from the workspace (host-side tools with their own `[workspace]`).
 
 ---
 
@@ -276,7 +273,7 @@ This audit corrects 4 false claims from the previous report and documents 14 ver
 1. **Security:** Fixed salt in password generation (S1) and login-manager authentication weaknesses (S2) — **both resolved** (commit `3216775`)
 2. **Correctness:** Syscall number mismatch (C1) and error-handling inconsistency (C2) — **C1 resolved**; C2 open
 3. **Build Reproducibility:** Hardcoded developer paths (B1) — open
-4. **Testing:** Complete absence of unit tests (T1) — stale; `libsarga` now has host-runnable `#[cfg(test)]` modules
+4. **Testing:** Complete absence of unit tests (T1) — resolved; `cargo test -p libsarga` runs libsarga's errno/net/semver `#[cfg(test)]` modules on the host (23 tests, CI-wired)
 
 Of the 14 verified issues, 6 are resolved, 2 are stale/false, and 6 remain open (C2, C3, S3, A1, B1, D4).
 

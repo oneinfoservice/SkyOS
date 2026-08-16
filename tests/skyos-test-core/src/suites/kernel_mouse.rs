@@ -1,4 +1,4 @@
-use crate::{Test, assert_result, assert_eq_result};
+use crate::Test;
 
 /// Replicated PS/2 mouse packet decoder (mirrors kernel's feed_byte logic).
 struct MouseState {
@@ -140,7 +140,7 @@ pub fn tests() -> Vec<Test> {
                 // Simulate a sequence of 3 packets as a user moves and clicks
                 let packets = vec![
                     ([0x08, 10, 5], false, "move right+down"),
-                    ([0x08, -3, -2], false, "move left+up"),
+                    ([0x38, 253, 254], false, "move left+up"), // dx=-3 (bit4), dy=-2 (bit5)
                     ([0x09, 0, 0], false, "left click"),
                     ([0x08, 0, 0], false, "release"),
                 ];

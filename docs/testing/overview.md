@@ -1,12 +1,13 @@
 # Testing Strategy Overview
 
-SkyOS has no `#[test]`-based harness (kernel is `#![no_std]` + `#![no_main]`; userspace is `#![no_std]` too, so `cargo test` does not run). Testing is done through real infrastructure:
+The bare-metal targets have no `#[test]`-based harness, but **`libsarga`'s pure-logic `#[cfg(test)]` modules run on the host**: `cargo test -p libsarga` compiles the crate under `cfg(test)` with the std test harness (23 errno/net/semver tests, wired into CI's `host-tests` job). Everything else is tested through real infrastructure:
 
 ## Test Layers
 
 | Layer | Mechanism | Scope | Speed |
 |-------|-----------|-------|-------|
-| Host-side algorithm suites | `tests/skyos-test` (`skyos-test-core` runner) | Buddy allocator, mouse decoder | Milliseconds |
+| libsarga unit tests | `cargo test -p libsarga` (std test harness) | errno/net/semver pure logic | Milliseconds |
+| Host-side algorithm suites | `tests/skyos-test` (`skyos-test-core` runner, CI-wired in `host-tests`) | Buddy allocator, mouse decoder | Milliseconds |
 | On-OS integration binaries | `tests/thread_test` (`#![no_std]` + `libsarga`) | Real syscalls at the login prompt | Seconds |
 | QEMU boot smoke test | `tests/qemu_boot.sh` | Boot to `login:` without panic | Minutes |
 | QEMU integration test | `tests/qemu_integration_test.sh` + `expect` | Boot + shell interaction | Minutes |
@@ -28,7 +29,10 @@ SkyOS has no `#[test]`-based harness (kernel is `#![no_std]` + `#![no_main]`; us
 ## Running Tests
 
 ```bash
-# Host-side suites
+# libsarga host unit tests
+cargo test -p libsarga
+
+# Host-side algorithm suites
 cargo run --manifest-path tests/skyos-test/Cargo.toml -- run
 
 # QEMU boot smoke test (kernel dir defaults to ../SKYIOUS KERNEL)

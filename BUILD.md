@@ -80,6 +80,7 @@ python build_disk.py --kernel-only
 # Fast userspace iteration (skips kernel)
 python build_disk.py --userspace-only
 
-# Specific crate
-cargo build --target x86_64-sarga.json -p sash
+# Specific crate (the sarga target has no precompiled sysroot, so core/alloc
+# are built from source; CI and build scripts pass -Zbuild-std explicitly)
+cargo build -Zbuild-std=core,alloc --target x86_64-sarga.json -p sash
 ```

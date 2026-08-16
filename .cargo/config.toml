@@ -1,6 +1,16 @@
+# No global `build-std`: it makes cargo rebuild core/alloc from source for EVERY
+# target, which breaks host builds (`cargo test -p libsarga` hits "duplicate
+# lang item in crate core"). The sarga target is a custom JSON spec with no
+# precompiled sysroot libs, so core/alloc must be built from source for it --
+# pass `-Zbuild-std=core,alloc` on sarga-target commands, exactly as CI does
+# (`cargo build -Zbuild-std=core,alloc --target x86_64-sarga.json`).
 [unstable]
-build-std = ["core", "alloc"]
 build-std-features = ["compiler-builtins-mem"]
 
-[build]
+# panic=abort is required by the sarga kernel ABI (no unwind runtime). Scoped
+# to the target so host builds -- `cargo test -p libsarga`, which compiles the
+# crate for the host with the std test harness -- do not inherit it and break
+# catch_unwind. `[profile.dev] panic = "abort"` in Cargo.toml already covers
+# the non-test sarga builds regardless of this rustflag.
+[target.'cfg(target_os = "none")']
 rustflags = ["-C", "panic=abort"]

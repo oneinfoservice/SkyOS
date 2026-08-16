@@ -1,6 +1,6 @@
 # Unit Testing Approach
 
-There is no `#[cfg(test)]`/`cargo test` unit-test framework in SkyOS (both kernel and userspace are `#![no_std]` with `#![no_main]`). The closest equivalents are the host-side suites and the kernel `self_test` feature.
+SkyOS has no unit-test framework on the bare-metal target (kernel and userspace are `#![no_std]`), but **`libsarga`'s pure-logic `#[cfg(test)]` modules run on the host**: `cargo test -p libsarga` compiles the crate for the host under `cfg(test)` (its `no_std`/lang-item attributes are `cfg_attr(not(test), ..)`/`#[cfg(not(test))]`) and runs the errno/net/semver tests with the std test harness. The closest equivalents for everything else are the host-side suites and the kernel `self_test` feature.
 
 ## Host-Side Suites (`tests/skyos-test-core`)
 

@@ -97,7 +97,7 @@ rustup component add rust-src
 rustup component add llvm-tools-preview
 
 # Build the project
-cargo build --target x86_64-sarga.json --release
+cargo build -Zbuild-std=core,alloc --target x86_64-sarga.json --release
 ```
 
 ### Finding Your First Contribution
@@ -124,10 +124,10 @@ cargo build --target x86_64-sarga.json --release
 ```powershell
 # 1. Make your changes
 # 2. Build and test
-cargo build --target x86_64-sarga.json
+cargo build -Zbuild-std=core,alloc --target x86_64-sarga.json
 
 # 3. Build a specific component
-cargo build --target x86_64-sarga.json -p coreutils
+cargo build -Zbuild-std=core,alloc --target x86_64-sarga.json -p coreutils
 
 # 4. Run the full dev loop (builds userspace + kernel + QEMU)
 .\scripts\dev_loop.ps1
@@ -164,10 +164,10 @@ SARGA OS uses a workspace Cargo.toml with 19 member crates. The custom target `x
 ### Key Build Commands
 
 ```bash
-cargo build                     # Debug build for host (won't work for cross-compilation)
-cargo build --target x86_64-sarga.json --release    # Release build for SARGA target
+cargo build                     # Debug build for host (host builds work; see libsarga's cargo test)
+cargo build -Zbuild-std=core,alloc --target x86_64-sarga.json --release    # Release build for SARGA target
 cargo build -p <crate>          # Build a single crate
-cargo build --target x86_64-sarga.json --release -p ade    # Build just the desktop env
+cargo build -Zbuild-std=core,alloc --target x86_64-sarga.json --release -p ade    # Build just the desktop env
 
 # Full build (cross-platform)
 python build_disk.py
@@ -245,7 +245,7 @@ refactor(gui): extract common widget rendering into shared module
 
 4. **Build and test** your changes locally:
    ```bash
-   cargo build --target x86_64-sarga.json --release
+   cargo build -Zbuild-std=core,alloc --target x86_64-sarga.json --release
    ```
 
 5. **Commit** your changes with a descriptive commit message.
@@ -346,11 +346,14 @@ Always ensure your changes compile:
 
 ```bash
 # Build everything
-cargo build --target x86_64-sarga.json --release
+cargo build -Zbuild-std=core,alloc --target x86_64-sarga.json --release
 
 # Build just the affected crate (faster)
-cargo build --target x86_64-sarga.json --release -p libsarga
-cargo build --target x86_64-sarga.json --release -p sash
+cargo build -Zbuild-std=core,alloc --target x86_64-sarga.json --release -p libsarga
+cargo build -Zbuild-std=core,alloc --target x86_64-sarga.json --release -p sash
+
+# Host unit tests for pure logic in libsarga (no QEMU, no kernel)
+cargo test -p libsarga
 ```
 
 ### Integration Testing

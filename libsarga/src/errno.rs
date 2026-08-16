@@ -7,13 +7,18 @@ static __ERRNO: AtomicI32 = AtomicI32::new(0);
 
 /// Returns a pointer to the thread-local errno location.
 /// Uses FS-segment TLS if available, otherwise falls back to a global static.
-#[no_mangle]
+#[cfg_attr(not(test), no_mangle)]
 pub extern "C" fn __errno_location() -> *mut i32 {
-    // Try TLS first (FS segment based, offset 0 = errno)
-    let mut base = 0u64;
-    let r = unsafe { crate::syscall::syscall2(158, 0x1003, &mut base as *mut u64 as u64) };
-    if r == 0 && base != 0 {
-        return unsafe { &mut *(base as *mut i32) };
+    // Try TLS first (FS segment based, offset 0 = errno). Skipped on the host
+    // test harness: the raw syscall traps in ring 3, and std provides its own
+    // errno slot, so the static fallback is the correct host behavior.
+    #[cfg(not(test))]
+    {
+        let mut base = 0u64;
+        let r = unsafe { crate::syscall::syscall2(158, 0x1003, &mut base as *mut u64 as u64) };
+        if r == 0 && base != 0 {
+            return unsafe { &mut *(base as *mut i32) };
+        }
     }
     __ERRNO.as_ptr()
 }

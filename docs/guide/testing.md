@@ -1,6 +1,6 @@
 # How to Write and Run Tests
 
-SkyOS has no `#[test]`-based test harness (kernel is `#![no_std]` + `#![no_main]`; `cargo test` does not work). Testing is split across host-side suites, on-OS integration binaries, and QEMU boot tests. See `docs/testing/integration.md` for the full picture.
+The bare-metal targets have no `#[test]`-based harness, but **`libsarga`'s pure-logic `#[cfg(test)]` modules run on the host**: `cargo test -p libsarga` compiles the crate under `cfg(test)` with the std test harness (23 errno/net/semver tests). Testing is otherwise split across host-side suites, on-OS integration binaries, and QEMU boot tests. See `docs/testing/integration.md` for the full picture.
 
 ## Host-Side Suites (`tests/skyos-test`)
 
@@ -42,4 +42,4 @@ The kernel `self_test` feature emits TAP output (`ok`/`not ok`) to serial during
 
 ## Running in CI
 
-The GitHub Actions workflow (`.github/workflows/ci.yml`) runs `fmt`, `clippy`, `check-all-targets` (debug+release), and `integration-qemu`. No unit-test stage exists.
+The GitHub Actions workflow (`.github/workflows/ci.yml`) runs `fmt`, `clippy`, `check-all-targets` (debug+release), and `integration-qemu`. The `host-tests` job also runs `cargo test -p libsarga` for libsarga's host unit tests.

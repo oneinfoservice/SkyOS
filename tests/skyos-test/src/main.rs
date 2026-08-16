@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use skyos_test_core::{TestRunner, suites, write_report_json, write_report_html};
+use skyos_test_core::{suites, write_report_html, write_report_json, TestRunner};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -49,21 +49,35 @@ fn main() {
             }
             println!("\nTotal: {} tests", tests.len());
         }
-        Commands::Run { category, format, output } => {
+        Commands::Run {
+            category,
+            format,
+            output,
+        } => {
             let mut runner = TestRunner::new();
-            runner.register_all(suites::all());
-
-            // Filter by category if specified
-            if let Some(ref cat) = category {
-                runner.register_all(
-                    suites::all().into_iter()
-                        .filter(|t| t.category.contains(cat.as_str()))
-                        .collect()
-                );
-            }
+            // Select ONCE: register_all extends, so registering the unfiltered
+            // list and then the filtered subset would run everything twice
+            // (e.g. --category kernel::alloc ran 23 tests instead of 6).
+            let selected: Vec<skyos_test_core::Test> = match category {
+                Some(ref cat) => suites::all()
+                    .into_iter()
+                    .filter(|t| t.category.contains(cat.as_str()))
+                    .collect(),
+                None => suites::all(),
+            };
+            runner.register_all(selected);
 
             runner.run_all();
             let report = runner.report();
+
+            // Exit-code discipline: a run with failures, or a run that
+            // executed nothing (e.g. a typo'd --category, or a suite silently
+            // dropped from registration), must fail the process -- otherwise
+            // CI and scripts stay green on a broken suite. This runs before
+            // the format match so json/html reports get it too.
+            if runner.failed() > 0 || runner.total() == 0 {
+                std::process::exit(1);
+            }
 
             match format.as_str() {
                 "json" => {
@@ -85,23 +99,28 @@ fn main() {
                     println!("\n=== SkyOS Test Results ===\n");
                     for run in runner.runs() {
                         let status = if run.passed { "PASS" } else { "FAIL" };
-                        println!("  [{}] {} [{:20}] {}", status, run.name, run.category, run.duration_ms);
+                        println!(
+                            "  [{}] {} [{:20}] {}",
+                            status, run.name, run.category, run.duration_ms
+                        );
                         if !run.message.is_empty() {
                             println!("       {}", run.message);
                         }
                     }
-                    println!("\nTotal: {} | Passed: {} | Failed: {}",
-                        runner.total(), runner.passed(), runner.failed());
+                    println!(
+                        "\nTotal: {} | Passed: {} | Failed: {}",
+                        runner.total(),
+                        runner.passed(),
+                        runner.failed()
+                    );
                 }
             }
         }
         Commands::Report { input, output } => {
-            let json_str = std::fs::read_to_string(&input)
-                .expect("Failed to read input file");
-            let report: skyos_test_core::TestReport = serde_json::from_str(&json_str)
-                .expect("Failed to parse JSON");
-            write_report_html(&report, output.to_str().unwrap())
-                .expect("Failed to write report");
+            let json_str = std::fs::read_to_string(&input).expect("Failed to read input file");
+            let report: skyos_test_core::TestReport =
+                serde_json::from_str(&json_str).expect("Failed to parse JSON");
+            write_report_html(&report, output.to_str().unwrap()).expect("Failed to write report");
             println!("Report written to {:?}", output);
         }
     }

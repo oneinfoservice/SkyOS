@@ -1,4 +1,4 @@
-use crate::{Test, assert_result, assert_eq_result};
+use crate::Test;
 
 /// Minimal buddy allocator implementation matching kernel logic.
 /// Simplified for host-side testing — validates the algorithm.
@@ -6,8 +6,6 @@ struct BuddyAllocator {
     /// Free lists per order (0 = 4K, 1 = 8K, ... MAX_ORDER-1)
     free_lists: Vec<Vec<usize>>,
     max_order: usize,
-    total_pages: usize,
-    base: usize,
 }
 
 impl BuddyAllocator {
@@ -16,7 +14,7 @@ impl BuddyAllocator {
         let order = (total_pages as f64).log2().ceil() as usize;
         let order = order.min(max_order - 1);
         free_lists[order].push(0);
-        BuddyAllocator { free_lists, max_order, total_pages, base: 0 }
+        BuddyAllocator { free_lists, max_order }
     }
 
     fn allocate(&mut self, order: usize) -> Option<usize> {
@@ -82,9 +80,12 @@ pub fn tests() -> Vec<Test> {
                 alloc.free(b1, 0);
                 assert_result!(alloc.is_free(b1, 0), "page should be free after free");
                 alloc.free(b2, 0);
-                // After freeing both, they should merge into order-1 buddy
+                // b1/b2 are order-0 buddies (0 and 1). These were the ONLY two
+                // allocations, so freeing both coalesces all the way up to the
+                // top order (the whole 1024-page pool becomes one order-10
+                // block), not just an order-1 merge.
                 let merged = b1.min(b2);
-                assert_result!(alloc.is_free(merged, 1), "buddies should merge");
+                assert_result!(alloc.is_free(merged, 10), "buddies should merge up to the top order");
                 Ok(())
             }),
         },
@@ -127,8 +128,11 @@ pub fn tests() -> Vec<Test> {
                 }
                 // Free the even blocks, creating free pages
                 for b in blocks { alloc.free(b, 0); }
-                // Should still have enough contiguous space for at least some allocations
-                assert_result!(alloc.allocate(2).is_some(), "allocate 4-page block after fragmentation");
+                // Fragmentation check: every odd page is still allocated, so no
+                // two contiguous pages exist — a 4-page (order-2) allocation
+                // must fail, while single pages must still succeed.
+                assert_result!(alloc.allocate(2).is_none(), "no contiguous 4-page block after fragmentation");
+                assert_result!(alloc.allocate(0).is_some(), "allocate a single page after fragmentation");
                 Ok(())
             }),
         },
@@ -138,7 +142,7 @@ pub fn tests() -> Vec<Test> {
             run: Box::new(|| {
                 let mut alloc = BuddyAllocator::new(64, 7);
                 // Allocate all, then free in specific order to test merging
-                let mut blocks: Vec<_> = (0..64).map(|_| alloc.allocate(0).unwrap()).collect();
+                let blocks: Vec<_> = (0..64).map(|_| alloc.allocate(0).unwrap()).collect();
                 // Free in reverse order
                 for b in blocks.into_iter().rev() {
                     alloc.free(b, 0);

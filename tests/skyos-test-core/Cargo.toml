@@ -1,3 +1,8 @@
+# Standalone workspace (see ../skyos-test/Cargo.toml): path-depended on by
+# skyos-test, which sits outside the userspace workspace, so this crate must
+# also declare its own workspace root.
+[workspace]
+
 [package]
 name = "skyos-test-core"
 version = "0.1.0"
