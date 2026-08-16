@@ -1,8 +1,11 @@
 """Build SkyOS initrd.tar with FHS directory structure."""
 import tarfile, os, sys, io
 
-def build_initrd(root_dir: str, output_path: str):
-    coreutils_bins = [
+# Binary manifest -- single home for the initrd contents. ade's app
+# catalog resolves exec paths against these names; tests/test_app_wiring.py
+# pins the wiring. mknod is deliberately excluded: the kernel mknod
+# syscall is still reserved/not-implemented (kernel-owns-facility audit).
+COREUTILS_BINS = [
         'ls', 'cat', 'mkdir', 'rm', 'cp', 'mv',
         'ps', 'clear', 'uname', 'printenv', 'sleep', 'yes',
         'rmdir', 'touch', 'hostname', 'which', 'env', 'echo', 'head', 'tail', 'wc', 'grep', 'ln', 'chmod',
@@ -14,9 +17,14 @@ def build_initrd(root_dir: str, output_path: str):
         'lspci', 'mount', 'nc', 'nl', 'od', 'patch', 'readlink',
         'sed', 'stat', 'su', 'sync', 'tac', 'tar', 'tee', 'top', 'tr',
         'true', 'umount', 'whoami', 'xargs',
-    ]
+        # Rest of the built coreutils set; mknod deliberately excluded --
+        # the kernel mknod syscall is still reserved/not-implemented.
+        'base64', 'expr', 'fold', 'less', 'logname', 'md5sum',
+        'mkfifo', 'mkfs_sargafs', 'more', 'nohup', 'seq', 'shuf',
+        'split', 'stdbuf', 'sum', 'tsort', 'tty', 'users',
+]
 
-    binaries = {
+BINARIES = {
         'bin/init':          'init',
         'bin/sash':          'sash',
         'bin/svc':           'svc',
@@ -40,11 +48,21 @@ def build_initrd(root_dir: str, output_path: str):
         'bin/sysmon':        'sysmon',
         'bin/ade':           'ade',
         'bin/skysettings':   'sargasettings',
+        'bin/skyedit':       'sargaedit',
+        'bin/skyfiles':      'sargafiles',
+        'bin/sargaview':     'sargaview',
         'bin/aicli':         'aicli',
         'bin/skystore':      'skystore',
         'bin/spkg':          'spkg',
         'bin/httpd':         'httpd',
         'bin/wget':          'wget',
+        'bin/curl':          'curl',
+        'bin/dhcp-client':   'dhcp-client',
+        'bin/resolve':       'resolve',
+        'bin/ssh-server':    'ssh-server',
+        'bin/echod':         'echod',
+        'bin/udpechod':      'udpechod',
+        'bin/udpechoc':      'udpechoc',
         'bin/futex_test':          'futex_test',
         'bin/sigchld_test':        'sigchld_test',
         'bin/sigint_test':         'sigint_test',
@@ -53,7 +71,12 @@ def build_initrd(root_dir: str, output_path: str):
         'bin/perm_test':           'perm_test',
         'bin/dac_test':            'dac_test',
         'bin/ipc_echo':            'ipc_echo',
-    }
+}
+
+def build_initrd(root_dir: str, output_path: str):
+    coreutils_bins = COREUTILS_BINS
+
+    binaries = BINARIES
     for b in coreutils_bins:
         binaries[f'bin/{b}'] = b
 
