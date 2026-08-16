@@ -142,14 +142,16 @@ unsafe impl GlobalAlloc for SargaMapper {
     }
 }
 
-#[cfg(not(test))]
+#[cfg(target_os = "none")]
 #[global_allocator]
 pub static ALLOCATOR: SargaMapper = SargaMapper::new();
 
 // The allocator lang items must not be defined when the crate is compiled for
-// the host test harness: std already provides both, and a second definition is
-// E0152 duplicate lang item.
-#[cfg(not(test))]
+// the host (whether under `cfg(test)` or as a dependency of a host binary):
+// std already provides both, and a second definition is E0152 duplicate lang
+// item. On the sarga targets (`os = "none"`) std is absent, so they are
+// defined there.
+#[cfg(target_os = "none")]
 #[alloc_error_handler]
 fn alloc_error_handler(layout: core::alloc::Layout) -> ! {
     panic!("allocation error: {:?}", layout)

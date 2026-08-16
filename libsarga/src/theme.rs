@@ -105,3 +105,98 @@ impl Theme {
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn channel(c: u32, shift: u32) -> f64 {
+        ((c >> shift) & 0xFF) as f64 / 255.0
+    }
+
+    fn srgb_linear(v: f64) -> f64 {
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    fn luminance(c: u32) -> f64 {
+        let r = srgb_linear(channel(c, 16));
+        let g = srgb_linear(channel(c, 8));
+        let b = srgb_linear(channel(c, 0));
+        0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+
+    fn contrast(a: u32, b: u32) -> f64 {
+        let la = luminance(a);
+        let lb = luminance(b);
+        let (hi, lo) = if la > lb { (la, lb) } else { (lb, la) };
+        (hi + 0.05) / (lo + 0.05)
+    }
+
+    #[test]
+    fn test_on_accent_contrast_aa_both_themes() {
+        // Documented 5.13:1 in both themes (comment on Theme::on_accent).
+        for t in [Theme::dark(), Theme::light()] {
+            assert!(contrast(t.on_accent, t.accent) >= 4.5);
+        }
+    }
+
+    #[test]
+    fn test_hover_matches_accent_both_themes() {
+        // hover is documented as the same indigo as accent in both themes.
+        for t in [Theme::dark(), Theme::light()] {
+            assert_eq!(t.hover, t.accent);
+        }
+    }
+
+    #[test]
+    fn test_light_theme_text_contrast() {
+        let t = Theme::light();
+        assert!(contrast(t.text, t.bg_surface) >= 4.5);
+        assert!(contrast(t.text, t.bg_primary) >= 4.5);
+    }
+
+    #[test]
+    fn test_dark_theme_text_contrast() {
+        let t = Theme::dark();
+        assert!(contrast(t.text, t.bg_surface) >= 4.5);
+        assert!(contrast(t.text, t.bg_elevated) >= 4.5);
+    }
+
+    #[test]
+    fn test_light_disabled_text_aa() {
+        // Documented 4.6:1 on white (comment on text_disabled in light()).
+        assert!(contrast(Theme::light().text_disabled, 0xFFFFFFFF) >= 4.5);
+    }
+
+    #[test]
+    fn test_light_success_on_elevated_aa() {
+        // Documented 5.6:1 on the light elevated surface.
+        assert!(contrast(Theme::light().success, Theme::light().bg_elevated) >= 4.5);
+    }
+
+    #[test]
+    fn test_layout_metrics_consistent_across_themes() {
+        let d = Theme::dark();
+        let l = Theme::light();
+        assert_eq!(d.font_size, l.font_size);
+        assert_eq!(d.border_radius, l.border_radius);
+        assert_eq!(d.padding, l.padding);
+        assert_eq!(d.spacing, l.spacing);
+    }
+
+    #[test]
+    fn test_close_button_colors_are_red() {
+        for c in [colors::WIN_CLOSE_HOVER, colors::WIN_CLOSE_PRESSED] {
+            let r = (c >> 16) & 0xFF;
+            let g = (c >> 8) & 0xFF;
+            let b = c & 0xFF;
+            assert!(r > g && r > b, "close color {:#x} must be red-family", c);
+        }
+        assert_ne!(colors::WIN_CLOSE_HOVER, colors::WIN_CLOSE_PRESSED);
+    }
+}

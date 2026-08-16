@@ -105,3 +105,64 @@ pub fn verify_password(shadow_data: &[u8], username: &str, password: &str) -> bo
     }
     false
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hex_decode_valid() {
+        assert_eq!(hex_decode(b"00ff10"), Some(vec![0x00, 0xff, 0x10]));
+        assert_eq!(hex_decode(b"DEADBEEF"), Some(vec![0xde, 0xad, 0xbe, 0xef]));
+    }
+
+    #[test]
+    fn test_hex_decode_invalid() {
+        // Odd length, non-hex, and the 0x prefix are all rejected by the hex crate.
+        assert_eq!(hex_decode(b""), Some(vec![]));
+        assert_eq!(hex_decode(b"0"), None);
+        assert_eq!(hex_decode(b"zz"), None);
+        assert_eq!(hex_decode(b"0x10"), None);
+    }
+
+    #[test]
+    fn test_verify_password_user_not_found() {
+        let shadow = b"alice:PBKDF2-00000000000000000000000000000000:0000000000000000000000000000000000000000000000000000000000000000:10000\n";
+        assert!(!verify_password(shadow, "bob", "pw"));
+        assert!(!verify_password(b"", "alice", "pw"));
+    }
+
+    #[test]
+    fn test_verify_password_rejects_non_pbkdf2() {
+        // crypt(3)-style entries and plaintext must be rejected outright.
+        let shadow = b"alice:$6$saltsaltsaltsalt$hashhash\nbob:{PLAIN}secret\n";
+        assert!(!verify_password(shadow, "alice", "pw"));
+        assert!(!verify_password(shadow, "bob", "secret"));
+    }
+
+    #[test]
+    fn test_verify_password_rejects_bad_salt() {
+        // Salt hex that is not exactly 16 bytes.
+        let shadow = b"alice:PBKDF2-00:00000000000000000000000000000000000000000000000000000000000000\n";
+        assert!(!verify_password(shadow, "alice", "pw"));
+    }
+
+    #[test]
+    fn test_verify_password_rejects_bad_dk() {
+        let shadow = b"alice:PBKDF2-00000000000000000000000000000000:00\n";
+        assert!(!verify_password(shadow, "alice", "pw"));
+    }
+
+    #[test]
+    fn test_verify_password_wellformed_mismatched_dk_is_false() {
+        // A fully well-formed entry parses and reaches the PBKDF2 syscall.
+        // The stored dk (0xAB x32) cannot match the derived digest of "pw"
+        // under any behavior: on the host the raw syscall is undefined (the
+        // result is never all-0xAB), and on the kernel a real PBKDF2 of "pw"
+        // is not that digest either.
+        let shadow = b"alice:PBKDF2-00000000000000000000000000000000:ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB:10000\n";
+        assert!(!verify_password(shadow, "alice", "pw"));
+    }
+}
+

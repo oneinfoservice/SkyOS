@@ -1,9 +1,12 @@
 // Host `cargo test` builds the crate with the std test harness, so the
 // no_std attributes and lang items are applied only for the real (kernel)
-// build. Under `cfg(test)` the crate compiles as a std lib and the tests in
-// errno/net/semver run on the host.
+// build (sarga targets are `os = "none"`). Under `cfg(test)` — and whenever
+// the crate is compiled as a dependency on a host target, where std already
+// provides the panic handler, global allocator, and alloc error handler —
+// the crate compiles as a std lib and the tests in errno/net/semver run on
+// the host.
 #![cfg_attr(not(test), no_std)]
-#![cfg_attr(not(test), feature(alloc_error_handler))]
+#![cfg_attr(target_os = "none", feature(alloc_error_handler))]
 
 pub extern crate alloc;
 
@@ -62,7 +65,7 @@ macro_rules! sarga_main {
     };
 }
 
-#[cfg(not(test))]
+#[cfg(target_os = "none")]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     crate::println!("SARGA OS PANIC: {}", info);

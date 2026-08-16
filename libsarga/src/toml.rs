@@ -308,3 +308,99 @@ fn parse_value(
         _ => Err("Unexpected character in value"),
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_basic_types() {
+        let doc = TomlDocument::parse("s = \"SkyOS\"\ni = 42\nf = 1.5\nb = true\n").unwrap();
+        assert_eq!(doc.get_string("s"), Some("SkyOS"));
+        assert_eq!(doc.get_string("i"), None); // get_string only reads strings
+
+        let mut ints = 0;
+        let mut floats = 0;
+        let mut bools = 0;
+        for (k, v) in &doc.values {
+            match k.as_str() {
+                "i" => {
+                    assert!(matches!(v, TomlValue::Integer(42)));
+                    ints += 1;
+                }
+                "f" => {
+                    assert!(matches!(v, TomlValue::Float(x) if *x == 1.5));
+                    floats += 1;
+                }
+                "b" => {
+                    assert!(matches!(v, TomlValue::Boolean(true)));
+                    bools += 1;
+                }
+                _ => {}
+            }
+        }
+        assert_eq!((ints, floats, bools), (1, 1, 1));
+    }
+
+    #[test]
+    fn test_parse_string_escapes() {
+        let doc = TomlDocument::parse("msg = \"a\\tb\\nc\\\"d\\\\e\"\n").unwrap();
+        assert_eq!(doc.get_string("msg"), Some("a\tb\nc\"d\\e"));
+    }
+
+    #[test]
+    fn test_parse_literal_string_no_escapes() {
+        let doc = TomlDocument::parse("p = 'C:\\path\\raw'\n").unwrap();
+        assert_eq!(doc.get_string("p"), Some("C:\\path\\raw"));
+    }
+
+    #[test]
+    fn test_parse_array() {
+        let doc = TomlDocument::parse("nums = [1, 2, 3]\n").unwrap();
+        match &doc.values[0].1 {
+            TomlValue::Array(items) => {
+                assert_eq!(items.len(), 3);
+                assert!(matches!(&items[0], TomlValue::Integer(1)));
+                assert!(matches!(&items[2], TomlValue::Integer(3)));
+            }
+            other => panic!("expected array, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_table_array() {
+        let src = "version = \"1.0\"\n[[files]]\npath = \"/bin/foo\"\nsize = 1024\n[[files]]\npath = \"/bin/bar\"\nsize = 2048\n";
+        let doc = TomlDocument::parse(src).unwrap();
+        assert_eq!(doc.get_string("version"), Some("1.0"));
+        let tables = doc.get_tables("files");
+        assert_eq!(tables.len(), 2);
+        let first: Vec<(&str, &TomlValue)> = tables[0]
+            .iter()
+            .map(|(k, v)| (k.as_str(), v))
+            .collect();
+        assert!(first.iter().any(|(k, v)| *k == "path" && matches!(v, TomlValue::String(s) if s == "/bin/foo")));
+        assert!(first.iter().any(|(k, v)| *k == "size" && matches!(v, TomlValue::Integer(1024))));
+    }
+
+    #[test]
+    fn test_parse_comments_and_blank_lines() {
+        let doc = TomlDocument::parse("# leading comment\nkey = \"v\" # trailing\n\n\nother = 1\n").unwrap();
+        assert_eq!(doc.get_string("key"), Some("v"));
+        assert!(doc.values.iter().any(|(k, v)| k == "other" && matches!(v, TomlValue::Integer(1))));
+    }
+
+    #[test]
+    fn test_parse_empty_and_comment_only() {
+        assert!(TomlDocument::parse("").unwrap().values.is_empty());
+        assert!(TomlDocument::parse("# just a comment").unwrap().values.is_empty());
+    }
+
+    #[test]
+    fn test_parse_single_table_flattens() {
+        // The minimal parser skips [section] headers and keeps the keys at the
+        // top level; pinned here so a change is a deliberate decision.
+        let doc = TomlDocument::parse("[section]\na = 1\n").unwrap();
+        assert!(doc.values.iter().any(|(k, v)| k == "a" && matches!(v, TomlValue::Integer(1))));
+    }
+}

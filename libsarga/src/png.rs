@@ -242,3 +242,184 @@ pub fn decode_png(data: &[u8]) -> Option<PngImage> {
         pixels,
     })
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a PNG chunk (length + type + data + CRC slot). The decoder skips
+    /// does not verify it.
+    fn chunk(typ: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut c = Vec::new();
+        c.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        c.extend_from_slice(typ);
+        c.extend_from_slice(data);
+        c.extend_from_slice(&[0u8; 4]); // CRC slot; decoder skips it unverified
+        c
+    }
+
+    fn ihdr(width: u32, height: u32, bit_depth: u8, color_type: u8) -> Vec<u8> {
+        let mut d = Vec::new();
+        d.extend_from_slice(&width.to_be_bytes());
+        d.extend_from_slice(&height.to_be_bytes());
+        d.push(bit_depth);
+        d.push(color_type);
+        d.extend_from_slice(&[0, 0, 0]); // compression, filter, interlace
+        d
+    }
+
+    /// Assemble a full PNG: signature + IHDR + optional PLTE/tRNS + IDAT + IEND.
+    fn png(
+        width: u32,
+        height: u32,
+        bit_depth: u8,
+        color_type: u8,
+        raw_rows: &[u8],
+        palette: Option<&[u8]>,
+        trns: Option<&[u8]>,
+    ) -> Vec<u8> {
+        let mut p = PNG_SIG.to_vec();
+        p.extend_from_slice(&chunk(b"IHDR", &ihdr(width, height, bit_depth, color_type)));
+        if let Some(plte) = palette {
+            p.extend_from_slice(&chunk(b"PLTE", plte));
+        }
+        if let Some(t) = trns {
+            p.extend_from_slice(&chunk(b"tRNS", t));
+        }
+        let compressed = miniz_oxide::deflate::compress_to_vec_zlib(raw_rows, 6);
+        p.extend_from_slice(&chunk(b"IDAT", &compressed));
+        p.extend_from_slice(&chunk(b"IEND", &[]));
+        p
+    }
+
+    #[test]
+    fn test_paeth_predictor() {
+        // Reference vectors (the PNG spec's filter-type-4 predictor).
+        assert_eq!(paeth_predictor(10, 20, 30), 10);
+        assert_eq!(paeth_predictor(0, 255, 0), 255);
+        assert_eq!(paeth_predictor(0, 0, 0), 0);
+        assert_eq!(paeth_predictor(255, 255, 255), 255);
+        assert_eq!(paeth_predictor(5, 5, 0), 5); // pa == pb -> left (a)
+    }
+
+    #[test]
+    fn test_u32_be() {
+        assert_eq!(u32_be(&[0x01, 0x02, 0x03, 0x04], 0), 0x01020304);
+        assert_eq!(u32_be(&[0xFF; 8], 4), 0xFFFFFFFF);
+        assert_eq!(u32_be(&[1, 2, 3], 0), 0); // out of bounds -> 0
+    }
+
+    #[test]
+    fn test_decode_rgba() {
+        // 2x2 RGBA, filter 0 on every row.
+        let rows = [
+            0, 10, 20, 30, 255, 40, 50, 60, 255, //
+            0, 70, 80, 90, 255, 100, 110, 120, 255,
+        ];
+        let img = decode_png(&png(2, 2, 8, 6, &rows, None, None)).unwrap();
+        assert_eq!((img.width, img.height), (2, 2));
+        assert_eq!(img.pixels.len(), 4);
+        assert_eq!(img.pixels[0], 0xFF000000 | (10 << 16) | (20 << 8) | 30);
+        assert_eq!(img.pixels[3], 0xFF000000 | (100 << 16) | (110 << 8) | 120);
+    }
+
+    #[test]
+    fn test_decode_rgb() {
+        let img = decode_png(&png(1, 1, 8, 2, &[0, 200, 100, 50], None, None)).unwrap();
+        assert_eq!(img.pixels[0], 0xFF000000 | (200 << 16) | (100 << 8) | 50);
+    }
+
+    #[test]
+    fn test_decode_grayscale() {
+        let img = decode_png(&png(1, 1, 8, 0, &[0, 200], None, None)).unwrap();
+        assert_eq!(img.pixels[0], 0xFF000000 | (200 << 16) | (200 << 8) | 200);
+    }
+
+    #[test]
+    fn test_decode_grayscale_alpha() {
+        let img = decode_png(&png(1, 1, 8, 4, &[0, 200, 128], None, None)).unwrap();
+        assert_eq!(img.pixels[0], (128 << 24) | (200 << 16) | (200 << 8) | 200);
+    }
+
+    #[test]
+    fn test_decode_indexed_with_palette_and_trns() {
+        // 3-entry palette; tRNS overrides the alpha of entry 1.
+        let plte = [255, 0, 0, 0, 255, 0, 0, 0, 255];
+        let trns = [0xFF, 0x80, 0xFF];
+        let img = decode_png(&png(1, 1, 8, 3, &[0, 1], Some(&plte), Some(&trns))).unwrap();
+        assert_eq!(img.pixels[0], (0x80 << 24) | (0 << 16) | (255 << 8) | 0);
+    }
+
+    #[test]
+    fn test_decode_paeth_filter_row() {
+        // One 2-pixel RGBA row encoded with filter type 4. NOTE: this
+        // decoder's paeth predictor is per-channel -- `a` is the same
+        // channel of the previous pixel (unfiltered[x - bpp]), not the
+        // adjacent byte -- so with a zero prev row pixel 0's channels all
+        // predict 0 (its raw bytes ARE the pixel), and pixel 1's deltas are
+        // against pixel 0's same-channel values. Pinned deliberately.
+        let raw = [4, 10, 20, 30, 255, 30, 30, 30, 0];
+        let img = decode_png(&png(2, 1, 8, 6, &raw, None, None)).unwrap();
+        assert_eq!(img.pixels[0], 0xFF000000 | (10 << 16) | (20 << 8) | 30);
+        assert_eq!(img.pixels[1], 0xFF000000 | (40 << 16) | (50 << 8) | 60);
+    }
+
+    #[test]
+    fn test_decode_rejects_bad_signature() {
+        assert!(decode_png(b"not a png").is_none());
+        assert!(decode_png(b"").is_none());
+        assert!(decode_png(&[0u8; 8]).is_none());
+    }
+
+    #[test]
+    fn test_decode_rejects_truncated() {
+        // IHDR claims data beyond the end of the file.
+        let mut p = PNG_SIG.to_vec();
+        p.extend_from_slice(&chunk(b"IHDR", &[0; 13]));
+        p.extend_from_slice(&[0xFF; 8]); // partial IDAT chunk header
+        assert!(decode_png(&p).is_none());
+    }
+
+    #[test]
+    fn test_decode_rejects_missing_ihdr() {
+        // Signature + IDAT + IEND with no IHDR chunk at all.
+        let mut p = PNG_SIG.to_vec();
+        let compressed = miniz_oxide::deflate::compress_to_vec_zlib(&[], 6);
+        p.extend_from_slice(&chunk(b"IDAT", &compressed));
+        p.extend_from_slice(&chunk(b"IEND", &[]));
+        assert!(decode_png(&p).is_none());
+    }
+
+    #[test]
+    fn test_decode_rejects_bad_bit_depth() {
+        assert!(decode_png(&png(1, 1, 16, 6, &[0, 0, 0, 0, 0, 0, 0, 0, 0], None, None)).is_none());
+    }
+
+    #[test]
+    fn test_decode_rejects_bad_color_type() {
+        assert!(decode_png(&png(1, 1, 8, 1, &[0, 0], None, None)).is_none());
+    }
+
+    #[test]
+    fn test_decode_rejects_unknown_filter() {
+        assert!(decode_png(&png(1, 1, 8, 6, &[5, 0, 0, 0, 0], None, None)).is_none());
+    }
+
+    #[test]
+    fn test_decode_rejects_no_idat() {
+        let mut p = PNG_SIG.to_vec();
+        p.extend_from_slice(&chunk(b"IHDR", &ihdr(1, 1, 8, 6)));
+        p.extend_from_slice(&chunk(b"IEND", &[]));
+        assert!(decode_png(&p).is_none());
+    }
+
+    #[test]
+    fn test_decode_rejects_garbage_idat() {
+        let mut p = PNG_SIG.to_vec();
+        p.extend_from_slice(&chunk(b"IHDR", &ihdr(1, 1, 8, 6)));
+        p.extend_from_slice(&chunk(b"IDAT", b"this is not zlib"));
+        p.extend_from_slice(&chunk(b"IEND", &[]));
+        assert!(decode_png(&p).is_none());
+    }
+}
