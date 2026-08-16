@@ -6,27 +6,15 @@ extern crate libsarga;
 
 use alloc::string::ToString;
 use alloc::vec::Vec;
-use libsarga::errno::Error;
-use libsarga::io::{self, close, ioctls, open, read};
+use libsarga::auth::{BACKOFF_NS, MAX_FAILED_ATTEMPTS};
+use libsarga::io::{self, read_to_end};
 use libsarga::process::{execve, setgid, setuid};
 use libsarga::sarga_main;
+use libsarga::tty::{ensure_echo, read_line, read_password};
 
 const PASSWD_PATH: &str = "/etc/passwd";
 const SHADOW_PATH: &str = "/etc/shadow";
 
-/// Failed login attempts tolerated before the getty pauses. The getty still
-/// re-prompts afterwards (never exits), so init's MAX_RESPAWNS accounting is
-/// untouched — the cap only throttles the PBKDF2 verify (10k iterations per
-/// attempt) so a brute-forcer or a stuck terminal cannot hammer it at full
-/// speed.
-const MAX_FAILED_ATTEMPTS: u32 = 10;
-/// Backoff pause in nanoseconds after MAX_FAILED_ATTEMPTS (30 s).
-const BACKOFF_NS: u64 = 30_000_000_000;
-
-/// Count one failed login attempt. When the cap is reached, announce the
-/// pause, sleep BACKOFF_NS, and reset the counter — the loop then re-prompts
-/// as before. Never exits, by design: the console getty stays alive for
-/// mistypes (the MAX_RESPAWNS fix depends on that).
 fn note_failed_attempt(failures: &mut u32) {
     *failures += 1;
     if *failures >= MAX_FAILED_ATTEMPTS {
@@ -40,144 +28,8 @@ fn note_failed_attempt(failures: &mut u32) {
     }
 }
 
-/// ECHO flag bit in termios `c_lflag` (POSIX).
-///
-/// NOTE: the kernel's `sys_ioctl` advertises `c_lflag: 0x5` with the comment
-/// "ICANON | ECHO", but 0x5 is ISIG|ICANON per POSIX — ECHO (0x8) is not
-/// actually set in the advertised value. We clear the POSIX ECHO bit; when
-/// the kernel lands a real termios implementation, verify it uses POSIX
-/// values (ECHO = 0x8), or this clear silently no-ops.
-const ECHO: u32 = 0x8;
-
-/// Termios layout mirrored from the kernel's `sys_ioctl` (repr(C), 4 u32
-/// fields + c_cc). `c_lflag` is the only field we touch.
-#[repr(C)]
-struct Termios {
-    c_iflag: u32,
-    c_oflag: u32,
-    c_cflag: u32,
-    c_lflag: u32,
-    c_cc: [u8; 19],
-}
-
-/// Disable input echo on `fd` (TCSETS clear ECHO) so a password typed at the
-/// console is not echoed back onto the wire/log. Best-effort: the kernel's
-/// TCSETS is currently a no-op returning 0, so this is forward-compatible
-/// with a real termios implementation.
-///
-/// Returns the previous `c_lflag` on success (`Some`) so the caller can
-/// restore it after reading; `None` when TCGETS/TCSETS failed (e.g. fd is
-/// not a tty) — the caller must then skip the restore so a bogus 0 cannot
-/// clobber real termios once the kernel implements TCSETS.
-fn echo_off(fd: i64) -> Option<u32> {
-    let mut t = Termios {
-        c_iflag: 0,
-        c_oflag: 0,
-        c_cflag: 0,
-        c_lflag: 0,
-        c_cc: [0; 19],
-    };
-    // TCGETS first so the other fields (iflag/oflag/cflag) are preserved
-    // when we write back — a TCSETS of a zeroed struct would clobber flow
-    // control / canonical flags once the kernel implements it.
-    if libsarga::io::ioctl(fd, ioctls::TCGETS, &mut t as *mut _ as *mut u8).is_err() {
-        return None;
-    }
-    let saved = t.c_lflag;
-    t.c_lflag &= !ECHO;
-    if libsarga::io::ioctl(fd, ioctls::TCSETS, &mut t as *mut _ as *mut u8).is_err() {
-        return None;
-    }
-    Some(saved)
-}
-
-/// Restore input echo on `fd` to `lflag` (TCSETS). Best-effort; reads the
-/// current termios first so untouched fields are preserved.
-fn echo_on(fd: i64, lflag: u32) {
-    let mut t = Termios {
-        c_iflag: 0,
-        c_oflag: 0,
-        c_cflag: 0,
-        c_lflag: 0,
-        c_cc: [0; 19],
-    };
-    if libsarga::io::ioctl(fd, ioctls::TCGETS, &mut t as *mut _ as *mut u8).is_err() {
-        return;
-    }
-    t.c_lflag = lflag;
-    let _ = libsarga::io::ioctl(fd, ioctls::TCSETS, &mut t as *mut _ as *mut u8);
-}
-
-/// Ensure the console tty echoes typed input (set the ECHO bit) before the
-/// username read. The username is read BEFORE `echo_off` runs (only the
-/// password is hidden), so it must not depend on the kernel's default
-/// c_lflag having ECHO set — a prior TCSETS or a future non-echoing default
-/// would otherwise leave the username invisible. Best-effort: silent no-op
-/// if TCGETS/TCSETS fails (non-tty fd), mirroring echo_off/echo_on.
-fn ensure_echo(fd: i64) {
-    let mut t = Termios {
-        c_iflag: 0,
-        c_oflag: 0,
-        c_cflag: 0,
-        c_lflag: 0,
-        c_cc: [0; 19],
-    };
-    if libsarga::io::ioctl(fd, ioctls::TCGETS, &mut t as *mut _ as *mut u8).is_err() {
-        return;
-    }
-    t.c_lflag |= ECHO;
-    let _ = libsarga::io::ioctl(fd, ioctls::TCSETS, &mut t as *mut _ as *mut u8);
-}
-
-/// Read one line from `fd`, terminating on `\n` or `\r`. Returns `Ok(None)`
-/// on EOF (zero bytes read), `Ok(Some(line))` for a terminated line (which
-/// may be empty), `Err` on a read error.
-fn read_line(fd: i64) -> Result<Option<Vec<u8>>, Error> {
-    let mut buf = Vec::new();
-    let mut byte = [0u8; 1];
-    loop {
-        let n = read(fd, &mut byte)?;
-        if n == 0 {
-            return Ok(None);
-        }
-        if byte[0] == b'\n' || byte[0] == b'\r' {
-            break;
-        }
-        buf.push(byte[0]);
-    }
-    Ok(Some(buf))
-}
-
-/// Read a password line from `fd` with input echo disabled for the duration.
-/// Mirrors the classic getty/login pattern: disable echo, read, restore.
-/// The restore is skipped when echo_off failed (non-tty fd), so a bogus
-/// lflag can never clobber real termios.
-fn read_password(fd: i64) -> Result<Option<Vec<u8>>, Error> {
-    let saved = echo_off(fd);
-    let r = read_line(fd);
-    if let Some(lflag) = saved {
-        echo_on(fd, lflag);
-    }
-    r
-}
-
-fn read_whole_file(path: &str) -> Result<Vec<u8>, Error> {
-    let fd = open(path, 0)?;
-    let mut buf = Vec::new();
-    let mut tmp = [0u8; 512];
-    loop {
-        let n = read(fd, &mut tmp)?;
-        if n == 0 {
-            break;
-        }
-        buf.extend_from_slice(&tmp[..n]);
-    }
-    let _ = close(fd);
-    Ok(buf)
-}
-
 fn lookup_user(username: &str) -> Option<(u32, u32, Vec<u8>, Vec<u8>)> {
-    let data = read_whole_file(PASSWD_PATH).ok()?;
+    let data = read_to_end(PASSWD_PATH).ok()?;
     for line in data.split(|&b| b == b'\n') {
         if line.is_empty() {
             continue;
@@ -200,7 +52,7 @@ fn lookup_user(username: &str) -> Option<(u32, u32, Vec<u8>, Vec<u8>)> {
 }
 
 fn verify_password(username: &str, password: &str) -> bool {
-    let data = match read_whole_file(SHADOW_PATH) {
+    let data = match read_to_end(SHADOW_PATH) {
         Ok(d) => d,
         Err(_) => return false,
     };

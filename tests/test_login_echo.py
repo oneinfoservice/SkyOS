@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Host-runnable unit tests for login's getty echo contract (no QEMU).
 
-Pins `login/src/main.rs::echo_off` / `echo_on` / `ensure_echo` /
-`read_password` / `read_line` — the getty's echo + line-read contract:
+Pins `libsarga::tty` — echo_off / echo_on / ensure_echo / read_password /
+read_line, the getty's echo + line-read contract, in its single userspace
+home (shared with passwd):
 
   echo_off(fd)   -> TCGETS the current termios, save c_lflag, clear ECHO
                     (0x8) in c_lflag, TCSETS it back; returns the saved
@@ -27,9 +28,9 @@ Pins `login/src/main.rs::echo_off` / `echo_on` / `ensure_echo` /
                     an empty line `Ok(Some([]))`); a read `Err` propagates.
 
 Also pins passwd's echo discipline: passwd/src/main.rs hides its two
-new-password reads with the same echo_off/echo_on/read_password pattern
-(mirroring login), and its Termios struct stays byte-identical to login's
-so the kernel's TCSETS store copies the same span from both consumers.
+new-password reads through the shared libsarga::tty::read_password (no
+local Termios copy), so the kernel's TCSETS store has exactly one
+userspace mirror to verify against.
 
 Also pins that the GUI login path (login-manager) never relies on
 termios echo — its password field draws into a window (win.get_key /
@@ -43,9 +44,9 @@ test_login_flow.py:
   1. A faithful Python port driven through an injectable fake ioctl
      channel, so TCGETS-failure / TCSETS-failure / bit-clear / field-
      preservation semantics are executed on the host.
-  2. Source-contract pins that grep login/src/main.rs and libsarga's
-     ioctls module, so a drift in the Rust (const value, mask expression,
-     restore-skip) fails CI before any boot.
+  2. Source-contract pins that grep libsarga/src/tty.rs, login/src/main.rs
+     and libsarga's ioctls module, so a drift in the Rust (const value,
+     mask expression, restore-skip) fails CI before any boot.
 
 Run:  python3 tests/test_login_echo.py
 """
@@ -61,12 +62,14 @@ LOGIN_RS = os.path.join(REPO_ROOT, "login", "src", "main.rs")
 LIBSARGA_IO_RS = os.path.join(REPO_ROOT, "libsarga", "src", "io.rs")
 LOGIN_MANAGER_RS = os.path.join(REPO_ROOT, "login-manager", "src", "main.rs")
 PASSWD_RS = os.path.join(REPO_ROOT, "passwd", "src", "main.rs")
+TTY_RS = os.path.join(REPO_ROOT, "libsarga", "src", "tty.rs")
+INSTALLER_RS = os.path.join(REPO_ROOT, "installer", "src", "main.rs")
 
 # ioctl request numbers (mirrors libsarga/src/io.rs ioctls module).
 TCGETS = 0x5401
 TCSETS = 0x5402
 
-# ECHO bit in termios c_lflag (POSIX; pinned to login/src/main.rs).
+# ECHO bit in termios c_lflag (POSIX; pinned to libsarga/src/tty.rs).
 ECHO = 0x8
 
 CC_SIZE = 19
@@ -464,26 +467,30 @@ class TestSourceContract(unittest.TestCase):
             cls.login_manager = fh.read()
         with open(PASSWD_RS, encoding="utf-8") as fh:
             cls.passwd = fh.read()
+        with open(TTY_RS, encoding="utf-8") as fh:
+            cls.tty = fh.read()
+        with open(INSTALLER_RS, encoding="utf-8") as fh:
+            cls.installer = fh.read()
 
     def test_echo_const_is_0x8(self):
-        self.assertIn("const ECHO: u32 = 0x8;", self.login)
+        self.assertIn("pub const ECHO: u32 = 0x8;", self.tty)
 
     def test_clear_is_bitwise_and_not(self):
-        self.assertIn("t.c_lflag &= !ECHO;", self.login)
-        self.assertIn("let saved = t.c_lflag;", self.login)
-        self.assertIn("Some(saved)", self.login)
+        self.assertIn("t.c_lflag &= !ECHO;", self.tty)
+        self.assertIn("let saved = t.c_lflag;", self.tty)
+        self.assertIn("Some(saved)", self.tty)
 
     def test_restore_skipped_on_none(self):
-        self.assertIn("if let Some(lflag) = saved {", self.login)
-        self.assertIn("echo_on(fd, lflag);", self.login)
+        self.assertIn("if let Some(lflag) = saved {", self.tty)
+        self.assertIn("echo_on(fd, lflag);", self.tty)
 
     def test_echo_on_sets_exact_lflag(self):
-        self.assertIn("t.c_lflag = lflag;", self.login)
+        self.assertIn("t.c_lflag = lflag;", self.tty)
 
     def test_ioctls_match_libsarga(self):
         # login must call through libsarga's ioctls module.
-        self.assertIn("ioctls::TCGETS", self.login)
-        self.assertIn("ioctls::TCSETS", self.login)
+        self.assertIn("ioctls::TCGETS", self.tty)
+        self.assertIn("ioctls::TCSETS", self.tty)
         # libsarga must keep the Linux termios numbers.
         self.assertIn("pub const TCGETS: u64 = 0x5401;", self.io)
         self.assertIn("pub const TCSETS: u64 = 0x5402;", self.io)
@@ -494,13 +501,13 @@ class TestSourceContract(unittest.TestCase):
         # before c_lflag) would silently break the shared repr(C) layout
         # while all presence checks still pass.
         m = re.search(
-            r"#\[repr\(C\)\]\nstruct Termios \{\n"
-            r"\s+c_iflag: u32,\n"
-            r"\s+c_oflag: u32,\n"
-            r"\s+c_cflag: u32,\n"
-            r"\s+c_lflag: u32,\n"
-            r"\s+c_cc: \[u8; 19\],\n\}",
-            self.login,
+            r"#\[repr\(C\)\]\npub struct Termios \{\n"
+            r"\s+pub c_iflag: u32,\n"
+            r"\s+pub c_oflag: u32,\n"
+            r"\s+pub c_cflag: u32,\n"
+            r"\s+pub c_lflag: u32,\n"
+            r"\s+pub c_cc: \[u8; 19\],\n\}",
+            self.tty,
         )
         self.assertIsNotNone(m, "Termios repr(C) field order/layout drifted")
 
@@ -512,14 +519,14 @@ class TestSourceContract(unittest.TestCase):
         # size) or miss the new field — no compiler error, no boot failure.
         # Order itself is pinned by test_termios_layout_mirror; this pins
         # types + count + the computed sizes.
-        m = re.search(r"struct Termios \{\n(.+?)\n\}", self.login, re.S)
+        m = re.search(r"struct Termios \{\n(.+?)\n\}", self.tty, re.S)
         self.assertIsNotNone(m, "Termios struct body not found")
         # Exactly one occurrence in the whole file: a second (drifting)
         # copy below the good one would otherwise evade the mirror pin,
         # the size pin, and the file-counting workspace scan.
-        self.assertEqual(self.login.count("struct Termios"), 1,
-                         "login must define exactly one Termios struct")
-        fields = re.findall(r"\s+(c_[a-z]+): (u32|\[u8; (\d+)\])", m.group(1))
+        self.assertEqual(self.tty.count("struct Termios"), 1,
+                         "libsarga::tty must define exactly one Termios struct")
+        fields = re.findall(r"\s+pub (c_[a-z]+): (u32|\[u8; (\d+)\])", m.group(1))
         u32s = [f for f in fields if f[1] == "u32"]
         ccs = [f for f in fields if f[1].startswith("[")]
         self.assertEqual(
@@ -536,8 +543,8 @@ class TestSourceContract(unittest.TestCase):
     def test_single_userspace_termios_definition(self):
         # The audit's drift risk: if a new userspace crate defines its own
         # Termios, the kernel TCSETS store can no longer be verified against
-        # one mirror. Pin that exactly the two auth binaries define it
-        # (login + passwd — both hide typed secrets from the console tty).
+        # one mirror. Pin that exactly ONE userspace file defines it
+        # (libsarga/src/tty.rs — the shared home for the auth binaries).
         # ./kernel/ is an untracked local kernel copy, not a userspace crate
         # and not in the repo.
         hits = []
@@ -545,6 +552,7 @@ class TestSourceContract(unittest.TestCase):
             "target",
             "target-ws",
             ".git",
+            ".freebuff",
             "__pycache__",
             "archive",
             "1",
@@ -562,23 +570,23 @@ class TestSourceContract(unittest.TestCase):
                         hits.append(os.path.relpath(p, REPO_ROOT).replace("\\", "/"))
         self.assertEqual(
             sorted(hits),
-            ["login/src/main.rs", "passwd/src/main.rs"],
-            "exactly the two auth binaries may define Termios",
+            ["libsarga/src/tty.rs"],
+            "exactly one userspace file may define Termios (libsarga::tty)",
         )
 
-    def test_passwd_has_echo_discipline(self):
+    def test_passwd_uses_shared_tty_discipline(self):
         # passwd hides two new-password reads from the console tty with the
         # same echo_off/echo_on discipline as login's getty password read,
         # so the kernel's future ECHO-on-read cannot leak them to serial.
-        self.assertIn("const ECHO: u32 = 0x8;", self.passwd)
-        self.assertIn("struct Termios {", self.passwd)
-        self.assertIn("fn echo_off(fd: i64) -> Option<u32> {", self.passwd)
-        self.assertIn("fn echo_on(fd: i64, lflag: u32) {", self.passwd)
-        self.assertIn("fn read_password(fd: i64) -> Result<Vec<u8>, Error> {", self.passwd)
-        # Same bit-clear shape as login (TCGETS -> save -> clear ECHO -> TCSETS).
-        self.assertIn("t.c_lflag &= !ECHO;", self.passwd)
-        self.assertIn("let saved = t.c_lflag;", self.passwd)
-        self.assertIn("Some(saved)", self.passwd)
+        # passwd hides its two new-password reads through the shared
+        # libsarga::tty::read_password — it defines no local echo discipline
+        # anymore (single home, pinned by test_single_userspace_termios_definition).
+        self.assertIn("use libsarga::tty::read_password;", self.passwd)
+        self.assertNotIn("fn echo_off", self.passwd)
+        self.assertNotIn("fn echo_on", self.passwd)
+        self.assertNotIn("fn read_password", self.passwd)
+        self.assertNotIn("fn read_line", self.passwd)
+        self.assertNotIn("struct Termios", self.passwd)
 
     def test_passwd_both_reads_wrapped(self):
         # Both interactive reads ("New password:" / "Retype new password:")
@@ -590,14 +598,15 @@ class TestSourceContract(unittest.TestCase):
                          "no bare read_line(0) may survive in passwd")
 
     def test_passwd_restores_before_returning(self):
-        # Mirror of login's read_password: echo_off -> read_line -> restore
-        # on every outcome (only if echo_off succeeded) -> return r.
+        # The shared restore contract (libsarga::tty::read_password):
+        # echo_off -> read_line -> restore on every outcome (only if
+        # echo_off succeeded) -> return r. passwd consumes this function.
         m = re.search(
-            r"fn read_password\(fd: i64\) -> Result<Vec<u8>, Error> \{\n(.+?)\n\}",
-            self.passwd,
+            r"pub fn read_password\(fd: i64\) -> Result<Option<Vec<u8>>, Error> \{\n(.+?)\n\}",
+            self.tty,
             re.S,
         )
-        self.assertIsNotNone(m, "passwd read_password body not found")
+        self.assertIsNotNone(m, "libsarga::tty read_password body not found")
         body = m.group(1)
         # Presence guards first: a missing step must trip a clear
         # AssertionError, not a ValueError from .index() below.
@@ -616,30 +625,14 @@ class TestSourceContract(unittest.TestCase):
         # 0 can never clobber real termios once the kernel implements TCSETS.
         self.assertIn("if let Some(lflag) = saved {", body)
 
-    def test_passwd_termios_mirrors_login_layout(self):
-        # The future kernel TCSETS store copies size_of::<Termios>() from the
-        # caller's buffer; passwd's struct must stay byte-identical to
-        # login's or one consumer silently truncates. Compare the two bodies.
-        def body(text):
-            m = re.search(r"struct Termios \{\n(.+?)\n\}", text, re.S)
-            self.assertIsNotNone(m, "Termios struct body not found")
-            return m.group(1)
-
-        pb = body(self.passwd)
-        lb = body(self.login)
-        self.assertEqual(pb, lb, "passwd Termios must be byte-identical to login's")
-        self.assertEqual(self.passwd.count("struct Termios"), 1,
-                         "passwd must define exactly one Termios struct")
-        fields = re.findall(r"\s+(c_[a-z]+): (u32|\[u8; (\d+)\])", pb)
-        u32s = [f for f in fields if f[1] == "u32"]
-        ccs = [f for f in fields if f[1].startswith("[")]
-        self.assertEqual(
-            [f[0] for f in u32s],
-            ["c_iflag", "c_oflag", "c_cflag", "c_lflag"],
-            "exactly four u32 fields in order",
-        )
-        self.assertEqual(len(ccs), 1, "exactly one c_cc array")
-        self.assertEqual(ccs[0][2], "19", "c_cc must stay [u8; 19]")
+    def test_auth_binaries_define_no_local_termios(self):
+        # The single Termios layout lives in libsarga::tty; neither auth
+        # binary defines its own copy anymore, so the byte-identical-across-
+        # binaries risk is gone — there is one home, pinned by
+        # test_termios_layout_mirror / test_termios_layout_size_contract /
+        # test_single_userspace_termios_definition.
+        self.assertNotIn("struct Termios", self.login)
+        self.assertNotIn("struct Termios", self.passwd)
 
     def test_ensure_echo_sets_bit_and_precedes_username_read(self):
         # The username read runs BEFORE echo_off (only the password is
@@ -647,8 +640,8 @@ class TestSourceContract(unittest.TestCase):
         # the kernel's default c_lflag (0xB). Pin helper + call site: the
         # call sits between the "login: " prompt and the read_line(0) in
         # the interactive arm (comment lines in between are skipped).
-        self.assertIn("fn ensure_echo(fd: i64) {", self.login)
-        self.assertIn("t.c_lflag |= ECHO;", self.login)
+        self.assertIn("pub fn ensure_echo(fd: i64) {", self.tty)
+        self.assertIn("t.c_lflag |= ECHO;", self.tty)
         m = re.search(
             r'None => \{\n'
             r'\s*io::print_str\("login: "\);\n'
@@ -659,14 +652,11 @@ class TestSourceContract(unittest.TestCase):
         )
         self.assertIsNotNone(m, "ensure_echo must precede the username read")
 
-    def test_ensure_echo_before_echo_off_and_not_in_fixed_user(self):
-        # Source order: ensure_echo is defined before read_password's
-        # echo_off use, and only the interactive (None =>) username arm
-        # calls it — the fixed_user (Some(u) =>) arm never reads a
-        # username, so it must not call it either.
-        pos_ensure = self.login.index("fn ensure_echo")
-        pos_off_in_pw = self.login.index("let saved = echo_off(fd);")
-        self.assertLess(pos_ensure, pos_off_in_pw)
+    def test_ensure_echo_only_in_interactive_arm(self):
+        # Only the interactive (None =>) username arm calls ensure_echo —
+        # the fixed_user (Some(u) =>) arm never reads a username, so it
+        # must not call it either. (The helper itself lives in
+        # libsarga::tty; the "defined before use" ordering moved with it.)
         some_arm = self.login[
             self.login.index("Some(u) =>") : self.login.index("None => {")
         ]
@@ -677,18 +667,18 @@ class TestSourceContract(unittest.TestCase):
     def test_read_line_signature_and_terminator_contract(self):
         # Ok(None) on EOF (distinct from an empty Ok(Some([]))) and the
         # 1-byte buffer (lines assemble across many reads).
-        self.assertIn("fn read_line(fd: i64) -> Result<Option<Vec<u8>>, Error> {", self.login)
-        self.assertIn("let mut byte = [0u8; 1];", self.login)
-        self.assertIn("let n = read(fd, &mut byte)?;", self.login)
-        self.assertIn("if n == 0 {", self.login)
-        self.assertIn("return Ok(None);", self.login)
-        self.assertIn("if byte[0] == b'\\n' || byte[0] == b'\\r' {", self.login)
-        self.assertIn("break;", self.login)
+        self.assertIn("fn read_line(fd: i64) -> Result<Option<Vec<u8>>, Error> {", self.tty)
+        self.assertIn("let mut byte = [0u8; 1];", self.tty)
+        self.assertIn("let n = read(fd, &mut byte)?;", self.tty)
+        self.assertIn("if n == 0 {", self.tty)
+        self.assertIn("return Ok(None);", self.tty)
+        self.assertIn("if byte[0] == b'\\n' || byte[0] == b'\\r' {", self.tty)
+        self.assertIn("break;", self.tty)
         # Exactly one push in the whole file: a buggy read_line that
         # pushes before the terminator check AND again after would
         # otherwise still satisfy the order regex.
         self.assertEqual(
-            self.login.count("buf.push(byte[0]);"),
+            self.tty.count("buf.push(byte[0]);"),
             1,
             "read_line must contain exactly one buf.push(byte[0]);",
         )
@@ -706,13 +696,13 @@ class TestSourceContract(unittest.TestCase):
             r"\s+break;\n"
             r"\s+\}\n"
             r"\s+buf\.push\(byte\[0\]\);",
-            self.login,
+            self.tty,
             re.S,
         )
         self.assertIsNotNone(m, "read_line order drifted: EOF -> terminator -> push")
 
     def test_single_read_line_definition(self):
-        self.assertEqual(self.login.count("fn read_line(fd: i64)"), 1)
+        self.assertEqual(self.tty.count("fn read_line(fd: i64)"), 1)
 
     def test_read_password_restores_before_returning(self):
         # The restore runs on EVERY read_line outcome when echo_off
@@ -728,13 +718,13 @@ class TestSourceContract(unittest.TestCase):
             r"\s+\}\n"
             r"\s+r\n"
             r"\}",
-            self.login,
+            self.tty,
         )
         self.assertIsNotNone(m, "read_password must restore before returning r")
         # A `?` on the read_line call would propagate Err before the
         # restore — banned.
-        self.assertNotIn("read_line(fd)?", self.login)
-        self.assertEqual(self.login.count("echo_on(fd, lflag);"), 1)
+        self.assertNotIn("read_line(fd)?", self.tty)
+        self.assertEqual(self.tty.count("echo_on(fd, lflag);"), 1)
 
     def test_gui_login_does_not_rely_on_termios_echo(self):
         # login-manager's password field draws into a window
@@ -760,6 +750,27 @@ class TestSourceContract(unittest.TestCase):
         # libsarga's io::read (the import surface permits it).
         self.assertNotIn("read(0", lm_code)
         self.assertNotIn("io::read", lm_code)
+
+    def test_gui_installer_password_uses_window_pipeline(self):
+        # installer's password entry is the same GUI contract as
+        # login-manager's: win.get_key() input, star-masked draw_string
+        # output -- never the console tty. A future edit routing it
+        # through read_password/read_line/io::read would bring the
+        # kernel ECHO contract into play -- and this pin fails CI first.
+        ins = self.installer
+        ins_code = strip_rust(ins)
+        self.assertIn("win.get_key()", ins)  # GUI key pipeline, not the tty
+        self.assertIn('"*".repeat(password.len())', ins)  # masked stars
+        self.assertIn("draw_string", ins)  # GUI-drawn, not console echo
+        for banned in ("TCGETS", "TCSETS", "ioctl", "ECHO", "echo_off",
+                       "echo_on", "Termios", "read_password", "read_line"):
+            self.assertNotIn(
+                banned, ins_code, f"installer must not reference {banned}"
+            )
+        # No tty reads in code: neither idiomatic read(0, ...) nor
+        # libsarga's io::read (the import surface permits io::MouseState).
+        self.assertNotIn("read(0", ins_code)
+        self.assertNotIn("io::read", ins_code)
 
 if __name__ == "__main__":
     unittest.main()

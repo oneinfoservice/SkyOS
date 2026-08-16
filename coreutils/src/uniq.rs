@@ -17,15 +17,7 @@ fn user_main() -> i32 {
     }
     let mut prev = alloc::string::String::new();
     let mut dup_count: u64 = 0;
-    let mut buf = alloc::vec::Vec::new();
-    let mut tmp = [0u8; 4096];
-    loop {
-        match io::read(0, &mut tmp) {
-            Ok(0) => break,
-            Ok(n) => buf.extend_from_slice(&tmp[..n]),
-            Err(_) => break,
-        }
-    }
+    let buf = libsarga::io::read_stdin_all_bytes();
     let text = alloc::string::String::from_utf8_lossy(&buf);
     for line in text.lines() {
         if line == prev {

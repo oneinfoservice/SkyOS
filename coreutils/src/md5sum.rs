@@ -17,15 +17,7 @@ fn md5(data: &[u8]) -> [u8; 16] {
 
 fn user_main() -> i32 {
     if args::argc() < 2 {
-        let mut buf = [0u8; 4096];
-        let mut all = alloc::vec::Vec::new();
-        loop {
-            match io::read(0, &mut buf) {
-                Ok(0) => break,
-                Ok(n) => all.extend_from_slice(&buf[..n]),
-                Err(_) => break,
-            }
-        }
+        let all = libsarga::io::read_stdin_all_bytes();
         let hash = md5(&all);
         let mut s = String::new();
         for &b in &hash {
@@ -36,9 +28,9 @@ fn user_main() -> i32 {
     }
     for i in 1..args::argc() as usize {
         let path = args::get(i).unwrap_or("");
-        match io::read_to_string(path) {
+        match io::read_to_end(path) {
             Ok(content) => {
-                let hash = md5(content.as_bytes());
+                let hash = md5(&content);
                 let mut s = String::new();
                 for &b in &hash {
                     let _ = write!(s, "{:02x}", b);

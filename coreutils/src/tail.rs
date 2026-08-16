@@ -42,14 +42,7 @@ fn user_main() -> i32 {
         }
         io::close(fd).ok();
     } else {
-        loop {
-            let n = match io::read(0, &mut buf) {
-                Ok(0) => break,
-                Ok(n) => n,
-                Err(_) => break,
-            };
-            all.extend_from_slice(&buf[..n]);
-        }
+        all.extend_from_slice(&libsarga::io::read_stdin_all_bytes());
     }
 
     let s = core::str::from_utf8(&all).unwrap_or("");

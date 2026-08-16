@@ -35,6 +35,8 @@ import build_initrd  # noqa: E402 -- real constants, must come after sys.path
 
 LOGIN_RS = os.path.join(REPO_ROOT, "login", "src", "main.rs")
 LOGIN_MANAGER_RS = os.path.join(REPO_ROOT, "login-manager", "src", "main.rs")
+AUTH_RS = os.path.join(REPO_ROOT, "libsarga", "src", "auth.rs")
+LIBSARGA_IO_RS = os.path.join(REPO_ROOT, "libsarga", "src", "io.rs")
 GUI_LOGIN_EXP = os.path.join(REPO_ROOT, "tests", "qemu_gui_login.exp")
 LIBSARGA_LIB_RS = os.path.join(REPO_ROOT, "libsarga", "src", "lib.rs")
 LIBSARGA_HASH_RS = os.path.join(REPO_ROOT, "libsarga", "src", "hash.rs")
@@ -256,15 +258,17 @@ class TestAttemptCapContract(unittest.TestCase):
     def setUpClass(cls):
         with open(LOGIN_RS, encoding="utf-8") as fh:
             cls.src = fh.read()
+        with open(AUTH_RS, encoding="utf-8") as fh:
+            cls.auth = fh.read()
         cls.code = strip_rust(cls.src)
 
     def test_max_failed_attempts_is_10(self):
-        self.assertIn("const MAX_FAILED_ATTEMPTS: u32 = 10;", self.src)
+        self.assertIn("pub const MAX_FAILED_ATTEMPTS: u32 = 10;", self.auth)
 
     def test_backoff_ns_is_30_seconds(self):
         # 30_000_000_000 ns == 30 s. The literal itself is the pin; the
         # arithmetic below just documents the unit conversion for the reader.
-        self.assertIn("const BACKOFF_NS: u64 = 30_000_000_000;", self.src)
+        self.assertIn("pub const BACKOFF_NS: u64 = 30_000_000_000;", self.auth)
         self.assertEqual(30_000_000_000, 30 * 1_000_000_000)
 
     def test_note_failed_attempt_increments_then_resets_after_pause(self):
@@ -407,13 +411,15 @@ class TestGuiAttemptCapContract(unittest.TestCase):
             cls.src = fh.read()
         with open(GUI_LOGIN_EXP, encoding="utf-8") as fh:
             cls.gui_login_exp = fh.read()
+        with open(AUTH_RS, encoding="utf-8") as fh:
+            cls.auth = fh.read()
         cls.code = strip_rust(cls.src)
 
     def test_gui_max_failed_attempts_is_10(self):
-        self.assertIn("const MAX_FAILED_ATTEMPTS: u32 = 10;", self.src)
+        self.assertIn("pub const MAX_FAILED_ATTEMPTS: u32 = 10;", self.auth)
 
     def test_gui_backoff_ns_is_30_seconds(self):
-        self.assertIn("const BACKOFF_NS: u64 = 30_000_000_000;", self.src)
+        self.assertIn("pub const BACKOFF_NS: u64 = 30_000_000_000;", self.auth)
 
     def test_gui_note_failed_attempt_increments_then_resets_after_pause(self):
         self.assertIn("*failures += 1;", self.code)
@@ -671,13 +677,27 @@ class TestGuiAttemptCapContract(unittest.TestCase):
         # side's constants fails here before any boot.
         with open(LOGIN_RS, encoding="utf-8") as fh:
             console = fh.read()
+        with open(AUTH_RS, encoding="utf-8") as fh:
+            auth_src = fh.read()
         console_code = strip_rust(console)
+        # The throttle numbers now live in ONE place (libsarga::auth);
+        # both binaries import them, so a drift in either side's wiring
+        # (or in the shared values) fails here before any boot.
         for lit in (
-            "const MAX_FAILED_ATTEMPTS: u32 = 10;",
-            "const BACKOFF_NS: u64 = 30_000_000_000;",
+            "pub const MAX_FAILED_ATTEMPTS: u32 = 10;",
+            "pub const BACKOFF_NS: u64 = 30_000_000_000;",
         ):
-            self.assertIn(lit, console, "console getty throttle constant missing")
-            self.assertIn(lit, self.src, "GUI throttle constant missing")
+            self.assertIn(lit, auth_src, "libsarga::auth throttle constant missing")
+        self.assertIn(
+            "use libsarga::auth::{BACKOFF_NS, MAX_FAILED_ATTEMPTS};",
+            console,
+            "console getty must import the shared throttle constants",
+        )
+        self.assertIn(
+            "use libsarga::auth::{BACKOFF_NS, MAX_FAILED_ATTEMPTS};",
+            self.src,
+            "GUI login-manager must import the shared throttle constants",
+        )
         # The remaining asymmetry is call TOPOLOGY, not throttling: the
         # console counts all three interactive failure paths; the GUI counts
         # only the bad-creds branch (execve failure after a correct login
@@ -902,18 +922,19 @@ class TestNoteFailedAttemptStateMachine(unittest.TestCase):
         # The lockstep contract (pinned in source by
         # test_gui_and_console_throttle_constants_agree) is also true of the
         # behavioral ports. STRONGEST form: derive the port constants from
-        # the live Rust sources, so a Rust-side drift fails the behavioral
-        # layer too — not just the layer-2 grep pins.
+        # the live Rust source — the single libsarga::auth home both
+        # binaries import — so a Rust-side drift fails the behavioral
+        # layer too, not just the layer-2 grep pins.
         def rust_const(path, name):
             with open(os.path.join(REPO_ROOT, path), encoding="utf-8") as fh:
-                m = re.search(r"const " + name + r": u\w+ = (\d[\d_]*)", fh.read())
+                m = re.search(r"pub const " + name + r": u\w+ = (\d[\d_]*)", fh.read())
             self.assertIsNotNone(m, name + " not found in " + path)
             return int(m.group(1))
 
-        console_max = rust_const("login/src/main.rs", "MAX_FAILED_ATTEMPTS")
-        console_ns = rust_const("login/src/main.rs", "BACKOFF_NS")
-        gui_max = rust_const("login-manager/src/main.rs", "MAX_FAILED_ATTEMPTS")
-        gui_ns = rust_const("login-manager/src/main.rs", "BACKOFF_NS")
+        console_max = rust_const("libsarga/src/auth.rs", "MAX_FAILED_ATTEMPTS")
+        console_ns = rust_const("libsarga/src/auth.rs", "BACKOFF_NS")
+        gui_max = rust_const("libsarga/src/auth.rs", "MAX_FAILED_ATTEMPTS")
+        gui_ns = rust_const("libsarga/src/auth.rs", "BACKOFF_NS")
         # All four agree with each other AND with the port constants.
         self.assertEqual({console_max, gui_max}, {MAX_FAILED_ATTEMPTS})
         self.assertEqual({console_ns, gui_ns}, {BACKOFF_NS})
@@ -979,7 +1000,7 @@ class TestPanicContract(unittest.TestCase):
 
     KNOWN BOUNDARY: the credential logic is panic-free (no .unwrap(),
     no panic!, no unchecked slicing), but both auth binaries allocate on
-    the auth path (login's read_whole_file / read_line Vec growth,
+    the auth path (libsarga's read_to_end / tty's read_line Vec growth,
     login-manager's read_to_string / String::from / buffer push). An
     allocation failure routes through libsarga's #[alloc_error_handler]
     (mem.rs:150), which panics and exits 1 — the one vector the source scans cannot see. This is accepted as a
@@ -1001,6 +1022,8 @@ class TestPanicContract(unittest.TestCase):
             cls.lib = fh.read()
         with open(LIBSARGA_HASH_RS, encoding="utf-8") as fh:
             cls.hash = fh.read()
+        with open(LIBSARGA_IO_RS, encoding="utf-8") as fh:
+            cls.io = fh.read()
         with open(LOGIN_RS, encoding="utf-8") as fh:
             cls.login = fh.read()
         with open(LOGIN_MANAGER_RS, encoding="utf-8") as fh:
@@ -1035,7 +1058,7 @@ class TestPanicContract(unittest.TestCase):
 
     def test_alloc_error_handler_is_known_oom_boundary(self):
         # The ONLY panic vector the credential-logic scans cannot see is
-        # allocation failure: Vec growth in read_whole_file / read_line
+        # allocation failure: Vec growth in read_to_end / read_line
         # hits libsarga's #[alloc_error_handler], which panics and exits
         # 1 (mem.rs:150: "allocation error"). Pin that boundary explicitly
         # so it stays visible — an OOM is a system-level failure (accepted),
@@ -1080,11 +1103,12 @@ class TestPanicContract(unittest.TestCase):
         self.assertNotIn(".unwrap()", self.login_code)
         self.assertNotIn(".expect(", self.login_code)
         self.assertNotIn("panic!", self.login_code)
-        # The only slice in login is `&tmp[..n]` in read_whole_file, where
-        # n comes from read(fd, &mut tmp) — the kernel guarantees n <= 512,
-        # so it is safe by construction (not a panic vector). Pin that it
-        # stays a read-buffer slice and no hand-indexed slice appears.
-        self.assertIn("&tmp[..n]", self.login)
+        # The only slice in the whole-file read path is `&tmp[..n]` in the
+        # shared libsarga::io::read_to_end (login/passwd's read_whole_file
+        # consolidated there), where n comes from read(fd, &mut tmp) — the
+        # kernel guarantees n <= 512, so it is safe by construction. Pin
+        # that it stays a read-buffer slice in the shared home.
+        self.assertIn("&tmp[..n]", self.io)
         # No hand-computed slice indexes (a `&x[expr..]` where expr is not
         # a read-count) anywhere in login — those would be panic vectors.
         self.assertNotIn("[7..]", self.login)
@@ -2205,8 +2229,7 @@ class TestOption2bDocDiff(unittest.TestCase):
         lm = open(
             os.path.join(REPO_ROOT, "login-manager", "src", "main.rs"), encoding="utf-8"
         ).read()
-        self.assertIn("const MAX_FAILED_ATTEMPTS: u32 = 10;", lm)
-        self.assertIn("const BACKOFF_NS: u64 = 30_000_000_000;", lm)
+        self.assertIn("use libsarga::auth::{BACKOFF_NS, MAX_FAILED_ATTEMPTS};", lm)
         self.assertIn('[login] failed to create window: Out of memory (errno 12)', lm)
         self.assertIn("return 0;", lm)
         # The doc's hunk context must apply to the working tree.

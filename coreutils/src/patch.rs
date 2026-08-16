@@ -6,19 +6,6 @@ use libsarga::args;
 use libsarga::io;
 use libsarga::sarga_main;
 
-fn read_stdin() -> alloc::string::String {
-    let mut data = alloc::vec::Vec::new();
-    let mut buf = [0u8; 4096];
-    loop {
-        match io::read(0, &mut buf) {
-            Ok(0) => break,
-            Ok(n) => data.extend_from_slice(&buf[..n]),
-            Err(_) => break,
-        }
-    }
-    alloc::string::String::from_utf8_lossy(&data).into_owned()
-}
-
 fn read_file(path: &str) -> alloc::string::String {
     let fd = unsafe { libsarga::syscall::syscall2(2, path.as_ptr() as u64, 0) };
     if fd < 0 {
@@ -64,7 +51,7 @@ fn user_main() -> i32 {
         i += 1;
     }
     let diff = if file.is_empty() {
-        read_stdin()
+        alloc::string::String::from_utf8_lossy(&libsarga::io::read_stdin_all_bytes()).into_owned()
     } else {
         read_file(file)
     };

@@ -25,15 +25,7 @@ fn user_main() -> i32 {
         io::print_str("Usage: tr [-d] <from> <to>\n");
         return 0;
     }
-    let mut data = alloc::vec::Vec::new();
-    let mut buf = [0u8; 4096];
-    loop {
-        match io::read(0, &mut buf) {
-            Ok(0) => break,
-            Ok(n) => data.extend_from_slice(&buf[..n]),
-            Err(_) => break,
-        }
-    }
+    let data = libsarga::io::read_stdin_all_bytes();
     let mut map = alloc::collections::BTreeMap::new();
     let from_chars: alloc::vec::Vec<char> = from.chars().collect();
     let to_chars: alloc::vec::Vec<char> = to.chars().collect();

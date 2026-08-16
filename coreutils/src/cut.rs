@@ -5,19 +5,6 @@ use libsarga::args;
 use libsarga::io;
 use libsarga::sarga_main;
 
-fn read_all_stdin() -> alloc::vec::Vec<u8> {
-    let mut data = alloc::vec::Vec::new();
-    let mut buf = [0u8; 4096];
-    loop {
-        match io::read(0, &mut buf) {
-            Ok(0) => break,
-            Ok(n) => data.extend_from_slice(&buf[..n]),
-            Err(_) => break,
-        }
-    }
-    data
-}
-
 fn user_main() -> i32 {
     let mut delim = b'\t';
     let mut fields: alloc::vec::Vec<(usize, usize)> = alloc::vec::Vec::new();
@@ -55,7 +42,7 @@ fn user_main() -> i32 {
         io::print_str("Usage: cut -d<delim> -f<fields>\n");
         return 0;
     }
-    let data = read_all_stdin();
+    let data = libsarga::io::read_stdin_all_bytes();
     let text = alloc::string::String::from_utf8_lossy(&data);
     for line in text.lines() {
         let parts: alloc::vec::Vec<&str> = line.split(delim as char).collect();

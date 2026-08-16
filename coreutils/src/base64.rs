@@ -27,16 +27,7 @@ fn user_main() -> i32 {
             }
         }
     } else {
-        let mut buf = [0u8; 4096];
-        let mut all = alloc::vec::Vec::new();
-        loop {
-            match io::read(0, &mut buf) {
-                Ok(0) => break,
-                Ok(n) => all.extend_from_slice(&buf[..n]),
-                Err(_) => break,
-            }
-        }
-        all
+        libsarga::io::read_stdin_all_bytes()
     };
 
     if decode_mode {

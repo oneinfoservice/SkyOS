@@ -15,9 +15,9 @@ fn sysv_sum(data: &[u8]) -> (u16, usize) {
 fn user_main() -> i32 {
     if args::argc() > 1 {
         let path = args::get(1).unwrap();
-        match io::read_to_string(path) {
+        match io::read_to_end(path) {
             Ok(s) => {
-                let (cksum, blocks) = sysv_sum(s.as_bytes());
+                let (cksum, blocks) = sysv_sum(&s);
                 println!("{} {} {}", cksum, blocks, path);
             }
             Err(_) => {
@@ -26,15 +26,7 @@ fn user_main() -> i32 {
             }
         }
     } else {
-        let mut buf = [0u8; 4096];
-        let mut all = alloc::vec::Vec::new();
-        loop {
-            match io::read(0, &mut buf) {
-                Ok(0) => break,
-                Ok(n) => all.extend_from_slice(&buf[..n]),
-                Err(_) => break,
-            }
-        }
+        let all = libsarga::io::read_stdin_all_bytes();
         let (cksum, blocks) = sysv_sum(&all);
         println!("{} {}", cksum, blocks);
     }

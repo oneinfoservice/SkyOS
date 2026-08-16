@@ -563,24 +563,23 @@ fn expand_shell_vars(s: &str) -> String {
 }
 
 fn read_raw_line() -> String {
-    let mut buf = [0u8; 1024];
+    // Fallback line reader, used only when history is disabled (HISTORY is
+    // None). The byte read loop lives in libsarga::tty::read_line (single
+    // home, pinned by tests/test_single_home_gate.py); this wrapper adds the
+    // interactive backspace erasure the shell needs -- the auth binaries'
+    // pinned read_line contract deliberately keeps raw bytes. Note: a hard
+    // read error mid-line now yields "" instead of a partial line, and EOF
+    // mid-line discards the partial too (Ok(None)) -- both match the
+    // auth binaries' pinned read_line contract
+    // (tests/test_login_echo.py test_read_line_signature_and_terminator_contract).
     let mut input = String::new();
-    loop {
-        match libsarga::io::read(0, &mut buf) {
-            Ok(0) => break,
-            Ok(n) => {
-                for &c in &buf[..n] {
-                    if c == b'\n' || c == b'\r' {
-                        return input;
-                    }
-                    if c == 0x7f || c == 0x08 {
-                        input.pop();
-                    } else {
-                        input.push(c as char);
-                    }
-                }
+    if let Ok(Some(bytes)) = libsarga::tty::read_line(0) {
+        for &c in &bytes {
+            if c == 0x7f || c == 0x08 {
+                input.pop();
+            } else {
+                input.push(c as char);
             }
-            Err(_) => break,
         }
     }
     input

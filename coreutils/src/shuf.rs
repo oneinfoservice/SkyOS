@@ -52,19 +52,8 @@ fn user_main() -> i32 {
             }
         }
     } else {
-        let mut buf = [0u8; 4096];
-        let mut all = alloc::string::String::new();
-        loop {
-            match io::read(0, &mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    if let Ok(s) = core::str::from_utf8(&buf[..n]) {
-                        all.push_str(s);
-                    }
-                }
-                Err(_) => break,
-            }
-        }
+        let all = alloc::string::String::from_utf8_lossy(&libsarga::io::read_stdin_all_bytes())
+            .into_owned();
         all.lines().map(|l| l.to_string()).collect()
     };
 

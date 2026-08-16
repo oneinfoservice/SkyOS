@@ -2,14 +2,12 @@
 #![no_main]
 extern crate alloc;
 use alloc::string::String;
+use libsarga::auth::{BACKOFF_NS, MAX_FAILED_ATTEMPTS};
 use libsarga::theme::Theme;
 use libsarga::{gui::Window, sarga_main};
 use libsarga::{io, process};
 
 const SHADOW_PATH: &str = "/etc/shadow";
-const MAX_FAILED_ATTEMPTS: u32 = 10;
-/// Backoff pause in nanoseconds after MAX_FAILED_ATTEMPTS (30 s).
-const BACKOFF_NS: u64 = 30_000_000_000;
 
 fn verify_password(username: &str, password: &str) -> bool {
     let data = match libsarga::fs::read_to_string(SHADOW_PATH) {

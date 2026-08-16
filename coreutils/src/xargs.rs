@@ -3,7 +3,7 @@
 extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
-use libsarga::{args, io, println, sarga_main, syscall};
+use libsarga::{args, println, sarga_main, syscall};
 
 fn user_main() -> i32 {
     if args::argc() < 2 {
@@ -16,18 +16,7 @@ fn user_main() -> i32 {
             cmd_args.push(String::from(s));
         }
     }
-    let mut buf = [0u8; 4096];
-    let mut input = String::new();
-    loop {
-        let n = match io::read(0, &mut buf) {
-            Ok(0) => break,
-            Ok(n) => n,
-            Err(_) => break,
-        };
-        if let Ok(s) = core::str::from_utf8(&buf[..n]) {
-            input.push_str(s);
-        }
-    }
+    let input = String::from_utf8_lossy(&libsarga::io::read_stdin_all_bytes()).into_owned();
     for line in input.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {

@@ -5,44 +5,13 @@ extern crate alloc;
 extern crate libsarga;
 
 use alloc::string::ToString;
-use libsarga::hash;
-use libsarga::io::{self, close, open, read};
+use libsarga::io::{self, read_to_end};
 use libsarga::process::{execve, geteuid, setgid, setuid};
 use libsarga::sarga_main;
-
-fn read_whole_file(path: &str) -> Result<alloc::vec::Vec<u8>, libsarga::errno::Error> {
-    let fd = open(path, 0)?;
-    let mut buf = alloc::vec::Vec::new();
-    let mut tmp = [0u8; 512];
-    loop {
-        let n = read(fd, &mut tmp)?;
-        if n == 0 {
-            break;
-        }
-        buf.extend_from_slice(&tmp[..n]);
-    }
-    close(fd)?;
-    Ok(buf)
-}
-
-fn read_line(fd: i64) -> Result<alloc::vec::Vec<u8>, libsarga::errno::Error> {
-    let mut buf = alloc::vec::Vec::new();
-    let mut byte = [0u8; 1];
-    loop {
-        let n = read(fd, &mut byte)?;
-        if n == 0 {
-            break;
-        }
-        if byte[0] == b'\n' || byte[0] == b'\r' {
-            break;
-        }
-        buf.push(byte[0]);
-    }
-    Ok(buf)
-}
+use libsarga::tty::read_password;
 
 fn lookup_user(username: &str) -> Option<(u32, u32, alloc::vec::Vec<u8>, alloc::vec::Vec<u8>)> {
-    let data = read_whole_file("/etc/passwd\0").ok()?;
+    let data = read_to_end("/etc/passwd").ok()?;
     for line in data.split(|&b| b == b'\n') {
         if line.is_empty() {
             continue;
@@ -65,54 +34,11 @@ fn lookup_user(username: &str) -> Option<(u32, u32, alloc::vec::Vec<u8>, alloc::
 }
 
 fn verify_password(username: &str, password: &str) -> bool {
-    let data = match read_whole_file("/etc/shadow\0") {
+    let data = match read_to_end("/etc/shadow") {
         Ok(d) => d,
         Err(_) => return false,
     };
-    for line in data.split(|&b| b == b'\n') {
-        if line.is_empty() {
-            continue;
-        }
-        let mut parts = line.splitn(2, |&b| b == b':');
-        let name = parts.next().unwrap_or(b"");
-        if name != username.as_bytes() {
-            continue;
-        }
-        let rest = parts.next().unwrap_or(b"");
-        if rest.starts_with(b"PBKDF2-") {
-            let inner = &rest[7..];
-            let mut parts2 = inner.splitn(2, |&b| b == b':');
-            let salt_hex = parts2.next().unwrap_or(b"");
-            let rest3 = parts2.next().unwrap_or(b"");
-            let salt_bytes = match hash::hex_decode(salt_hex) {
-                Some(s) if s.len() == 16 => s,
-                _ => return false,
-            };
-            let mut salt_arr = [0u8; 16];
-            salt_arr.copy_from_slice(&salt_bytes);
-            let mut dk_hex = rest3;
-            let mut iterations: u32 = 10000;
-            if let Some(pos) = rest3.iter().position(|&b| b == b':') {
-                dk_hex = &rest3[..pos];
-                iterations = core::str::from_utf8(&rest3[pos + 1..])
-                    .unwrap_or("10000")
-                    .parse()
-                    .unwrap_or(10000);
-            }
-            let stored_dk = match hash::hex_decode(dk_hex) {
-                Some(s) if s.len() == 32 => s,
-                _ => return false,
-            };
-            let pw = password.as_bytes();
-            let mut dk_out = [0u8; 32];
-            if hash::pbkdf2_sha256(pw, &salt_arr, &mut dk_out, iterations).is_ok() {
-                return dk_out == stored_dk.as_slice();
-            }
-            return false;
-        }
-        return false;
-    }
-    false
+    libsarga::hash::verify_password(&data, username, password)
 }
 
 fn user_main() -> i32 {
@@ -135,9 +61,12 @@ fn user_main() -> i32 {
     let euid = geteuid();
     if euid != 0 {
         io::print_str("Password: ");
-        let pw_bytes = match read_line(0) {
-            Ok(b) => b,
-            Err(_) => libsarga::process::exit(1),
+        // Hidden input: the console tty must not echo the password back
+        // onto the wire/log. Shared libsarga::tty::read_password
+        // (echo_off -> read -> echo_on, restoring on every outcome).
+        let pw_bytes = match read_password(0) {
+            Ok(Some(b)) => b,
+            Ok(None) | Err(_) => libsarga::process::exit(1),
         };
         let password = core::str::from_utf8(&pw_bytes).unwrap_or("");
         if !verify_password(target_user, password) {
