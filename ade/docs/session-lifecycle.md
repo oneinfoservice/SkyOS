@@ -559,42 +559,53 @@ mechanism for when the kernel boots again.
      devfs mount (mod.rs:494-495, mounted unconditionally, shadowing
      the initrd tarfs's empty `dev/` dir — initrd.tar contains only
      `dev/`, no children). Traversal then hits devfs's fixed children
-     (devfs.rs:316-378): **null, zero, tty0, tty, fb0, speaker,
-     input/{event0,event1}** — there is NO `random`/`urandom`/`console`
-     anywhere in the kernel (grepped across all sources and all git
-     history).
-  3. `resolve_path("/dev/random")` → None → the `O_CREAT` branch
-     (mod.rs:1368-1399) splits parent/name, resolves `/dev` → devfs
-     root → calls `parent_node.create("random")`.
+     (devfs.rs:316-378): on the committed CI default branch, **null,
+     zero, tty0, tty, fb0, speaker, input/{event0,event1}** — there is
+     NO `random`/`urandom`/`console` anywhere in that tree. The
+     in-flight kernel (the uncommitted rewrite) mints **random,
+     urandom, console** natively in DevFs::new (devfs.rs:359-369,
+     between `tty` and `fb0`); the devfs contract test keys its node
+     pin to whichever tree is checked out.
+  3. `resolve_path("/dev/random")` → None on the CI default branch →
+     the `O_CREAT` branch (mod.rs:1368-1399) splits parent/name,
+     resolves `/dev` → devfs root → calls `parent_node.create("random")`.
+     (On the in-flight kernel the path instead resolves to the native
+     `random` node and the open succeeds as a no-op, step 4 not reached.)
   4. **`DevNode` implements `VfsNode` without overriding `create`**
      (devfs.rs:28-299 implements name/is_dir/read/write/statfs/stat/
      ioctl/children/find_child only) — so it uses the trait default
      `fn create → Err(())` (mod.rs:104-106). `if let Ok(new_node)`
      fails, and `sys_open` falls through to **`ENOENT`** (mod.rs:1400).
-  **Conclusion (current source): the O_CREAT fallback creates NEITHER a
+  **Conclusion (state-keyed to the kernel tree): while the nodes are
+  absent (CI default branch), the O_CREAT fallback creates NEITHER a
   devfs node NOR a plain file for non-native names — it fails with
-  `ENOENT`.** The three native names (`null`, `zero`, `tty`) succeed
-  because they resolve (O_CREAT is a no-op on an existing path);
-  `random`/`urandom`/`console` cannot be created at all. (Contrast: on
-  ramfs/tmpfs `create` IS implemented (ramfs.rs:192) and O_CREAT makes a
-  plain file; devfs simply has no create.) **Consequence:** on the
-  current kernel source, vahid's `create_devices` would return false →
-  `FATAL` → exit 1 → bounded give-up — the O_CREAT fallback alone is not
-  a working node-creation mechanism for 3 of its 6 nodes.
-  **Why the Aug 7 selftest-ISO boot contradicts this (KERNEL-GATED):**
-  the ISO showed `[vahid] ready` with ZERO `FAILED to create` lines, i.e.
-  all six opens succeeded on that build's kernel. But that ISO was built
-  Aug 7, while the kernel repo's last commit is Aug 5 (a18848f) with a
-  large UNCOMMITTED rewrite in flight (syscalls/mod.rs +128 lines
-  uncommitted) — the ISO's kernel is a different, in-flux state, not the
-  current source. The committed history shows devfs never had those
-  nodes nor a `create` (git log -S 'urandom' / -S 'fn create' on
-  devfs.rs: empty), so how the ISO's kernel created them is unknowable
-  from current sources. **The new `/dev` probe in `qemu_gui_gate.exp`
-  (stage 5, Aug 10: login → `ls /dev` asserting all six names →
-  `dd if=/dev/zero of=/dev/null bs=16 count=1`) settles this on the
-  next fresh CI boot — until then treat vahid's node creation as
-  kernel-gated and unverified against the current source.**
+  `ENOENT`.** The native names that exist (`null`, `zero`, `tty`) still
+  succeed because they resolve (O_CREAT is a no-op on an existing path);
+  on that tree `random`/`urandom`/`console` cannot be created at all —
+  vahid's `create_devices` would return false → `FATAL` → exit 1 →
+  bounded give-up (3 of its 6 nodes fail). **Once the in-flight kernel
+  lands** (random/urandom/console native in DevFs::new), all six names
+  resolve and the same O_CREAT opens succeed as no-ops —
+  `create_devices` returns true. (Contrast: on ramfs/tmpfs `create` IS
+  implemented (ramfs.rs:192) and O_CREAT makes a plain file; devfs still
+  has no `create` override in either state — the in-flight nodes are
+  native, not mknod-created.)
+  **Why the Aug 7 selftest-ISO boot showed all six opens succeeding
+  (explained by the in-flight kernel):** the ISO's kernel came from the
+  same uncommitted-rewrite lineage that today mints `random`/`urandom`/
+  `console` natively — so all six of vahid's opens resolved and
+  `[vahid] ready` printed with ZERO `FAILED to create` lines. The
+  committed CI default branch (last commit Aug 5, a18848f) still lacks
+  the nodes and still has no `create` override (git log -S 'urandom' /
+  -S 'fn create' on devfs.rs: empty), so on THAT tree the ENOENT
+  conclusion above holds. **Settlement mechanism:** the devfs contract
+  test (`tests/test_vahid_contract.py`
+  ::test_kernel_devfs_still_no_create_no_non_native_nodes) keys its pin
+  to the checked-out tree — absence pin on the CI default branch,
+  positive pin on the in-flight kernel — and the `/dev` probe in
+  `qemu_gui_gate.exp` (stage 5: login → `ls /dev` asserting all six
+  names → `dd if=/dev/zero of=/dev/null bs=16 count=1`) settles it on
+  the next fresh CI boot.**
 
 **UNVERIFIED (kernel in major change, or would need a QEMU run):**
 - ~~Who (if anyone) prints the console `login:` prompt in an ISO boot.~~
