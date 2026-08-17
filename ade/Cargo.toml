@@ -6,4 +6,5 @@ license.workspace = true
 
 [dependencies]
 libsarga = { path = "../libsarga" }
+libskyaudio = { path = "../libskyaudio" }
 bitflags = "2.4"

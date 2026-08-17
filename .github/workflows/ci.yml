@@ -1188,8 +1188,21 @@ jobs:
         # (lib.rs uses the same cfg_attr(not(test), no_std) treatment as
         # libsarga; main.rs is the bare-metal entrypoint only). Depends on
         # the libsarga gating above: ade links libsarga, and dependencies
-        # are never compiled with cfg(test). 36 tests; no QEMU, no syscalls.
+        # are never compiled with cfg(test). 30 tests (the audio mixer ones
+        # moved to libskyaudio); no QEMU, no syscalls.
         run: cargo test -p ade --lib
+
+      - name: libskyaudio host unit tests
+        working-directory: SkyOS
+        # libskyaudio's tone (beep math), wav (header parsing), and mixer
+        # (volume/balance) #[cfg(test)] modules run on the host via the lib
+        # target (same cfg_attr(not(test), no_std) treatment as libsarga/ade;
+        # the beep/play_wav syscall shims are untouched). The count is pinned
+        # so a test that stops running - or a module whose tests vanish -
+        # fails here instead of silently shrinking the suite.
+        run: |
+          cargo test -p libskyaudio --lib 2>&1 | tee skyaudio-test-log.txt
+          grep -q "test result: ok. 20 passed; 0 failed" skyaudio-test-log.txt
 
       - name: App wiring gate (initrd manifest <-> ade catalog)
         working-directory: SkyOS
